@@ -81,7 +81,7 @@ class KDE():
             evaluate = self.estimator.evaluate(self.kde_resolution)
             #kde_values = evaluate[0]
             #kde_pdf = evaluate[1]
-            idxs = euclidean_distances(data,evaluate[0]).argmin(axis = 1)
+            idxs = euclidean_distances(data,self._check_X_2d(evaluate[0])).argmin(axis = 1)
             return evaluate[1][idxs]
 
     def predict(self, X):
@@ -106,6 +106,7 @@ class KDE():
             return np.mean(-np.log2(self.pdf(self.rvs(size = sample_size))))
         else:
             kde_pdf = self.estimator.evaluate(self.kde_resolution)[1]
+            kde_pdf[kde_pdf<0] = 0 #assert non negativity
             kde_pdf = np.random.choice(kde_pdf,p = kde_pdf/kde_pdf.sum(), size = sample_size)
             return np.mean(-np.log2(kde_pdf))
 
@@ -120,17 +121,16 @@ class RandomVariable():
     '''
 
     @classmethod
-    def from_weights(cls, values, weights, n_samples = 100, **ecdf_kwargs):
+    def from_weights(cls, values, weights, n_samples = 100):
         data = np.random.choice(values,size = n_samples, p = weights)
-        return cls.__init__(data, **ecdf_kwargs)
+        return cls.__init__(data,)
 
-    def __init__(self, data, verbose = False, **ecdf_kwargs):
+    def __init__(self, data, verbose = False):
         self.samples = data
         self.n_dim = 1 if len(data.shape) == 1 else data.shape[-1]
         self._fitted_dists = {}
         self.log_likelihood = []
         self.verbose = False
-        self.ecdf = QuantileTransformer(**ecdf_kwargs).fit(data)
         return
 
     def __getitem__(self, item):
@@ -150,6 +150,9 @@ class RandomVariable():
         self._fit_all(self.samples, candidates)
         return self
 
+    def _fit_ecdf(self, data, **ecdf_kwargs):
+        self.ecdf = QuantileTransformer(**ecdf_kwargs).fit(data)
+        return self
 
     def fit_dist(self, dist, **dist_kwargs):
         return self._fit_dist(self.samples,dist, **dist_kwargs)
@@ -257,8 +260,9 @@ class RandomVariable():
         else:
             return self[dist].ppf(data)
 
-    def entropy(self, data, dist = ''):
-        pass
+    def entropy(self, dist):
+        return self[dist].entropy()
+
 
 # Cell
 class RVArray:

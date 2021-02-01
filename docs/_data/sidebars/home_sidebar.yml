@@ -7,24 +7,24 @@ entries:
 - folders:
   - folderitems:
     - output: web,pdf
-      title: Export to modules
-      url: /export.html
+      title: Overview
+      url: /
     - output: web,pdf
-      title: Convert to html
-      url: /export2html.html
+      title: module name here
+      url: core.html
     - output: web,pdf
-      title: Show doc
-      url: /showdoc.html
+      title: Dev comments
+      url: metrics.html
     - output: web,pdf
-      title: Test functions
-      url: /test.html
+      title: Meta Distributions
+      url: core.random_variable.html
     - output: web,pdf
-      title: Core functions
-      url: /core.html
+      title: 'Helping Functions - '
+      url: utils.html
     - output: web,pdf
-      title: Command line functions
-      url: /cli.html
+      title: Title
+      url: neighbors.html
     output: web
-    title: Notebook
+    title: scikit_density
   output: web
   title: Sidebar

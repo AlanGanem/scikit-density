@@ -16,11 +16,16 @@ from sklearn import ensemble
 from sklearn.preprocessing import OneHotEncoder, normalize, QuantileTransformer, FunctionTransformer
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.utils.fixes import _joblib_parallel_args
+from sklearn.metrics import pairwise
+from numpy.linalg import LinAlgError
+from scipy.spatial.distance import cdist
+
 import scipy
 from joblib import Parallel, delayed
 
 
 from .utils import cos_sim_query, sample_multi_dim, ctqdm, DelegateEstimatorMixIn
+from .metrics import kde_entropy, quantile, variance
 from .core.random_variable import KDE
 
 # Cell
@@ -29,10 +34,13 @@ from .core.random_variable import KDE
 #node quality functions
 def expected_likelihood(node_data, sample_size = 100):
     kde = KDE().fit(node_data)
+
     return np.mean(kde.pdf(kde.rvs(size = sample_size)))
 
-def inverese_log_node_var(node_data):
-    return 1/np.log1p(np.var(node_data))
+def inverese_log_node_var(node_data):  #makes no sense for multivariate distribtuions
+    centroid = node_data.mean(axis = 0).reshape(1,-1)
+    distances =  cdist(node_data, centroid, 'seuclidean').flatten()
+    return 1/np.log1p(np.mean(distances))
 
 
 # datapoint-node functions
@@ -40,10 +48,13 @@ def datapoint_pdf(node_data):
     return KDE().fit(node_data).pdf(node_data)
 
 def datapoint_gaussian_likelihood(node_data):
-    std = node_data.std()
-    mean = node_data.mean()
-    z = (node_data - mean)/std
-    return 1/(std*np.pi**(1/2))*np.exp(-1/2*z**2)
+    centroid = node_data.mean(axis = 0).reshape(1,-1)
+    distances =  cdist(node_data, centroid, 'seuclidean').flatten()
+    distance_std = distances.std()
+    #if distance_std == 0:
+    #    return 1
+    z = (distances - distances.mean())/distance_std
+    return 1/(distance_std*np.pi**(1/2))*np.exp(-1/2*z**2)
 
 
 AVALIBLE_NODE_AGG = {
@@ -61,27 +72,40 @@ class EnsembleTreesDensityMixin():
 
     '''Base Class containing important methods for building Naive and Similarity Density Tree estimators'''
 
+    @property
+    def _node_data_generator(self):
+        return self._make_node_data_generator(self.y_, self._raw_leaf_node_matrix)
+
+    def _make_node_kde_array(self): #<- since kde esitmation is the best approach, save kde fitted instances for each node
+        #to make use of it during node and node_data wieght inference
+        raise NotImplementedError
+
+    def _make_node_cdist_array(self): #<- gaussian likelihood works fine as well, so save cdist matrix for each node
+        raise NotImplementedError
+
     def _fit_leaf_node_matrix(self, X, y, node_rank_func, node_data_rank_func):
         nodes_array = self.estimator.apply(X)
         encoder = OneHotEncoder()
         leaf_node_matrix = encoder.fit_transform(nodes_array)
-        leaf_node_matrix = self._make_weighted_query_space(y, leaf_node_matrix, node_data_rank_func)
 
-        self.leaf_node_weights = self._calculate_node_weights(y, leaf_node_matrix, node_rank_func)
-        self.leaf_node_matrix = leaf_node_matrix
-        self.encoder = encoder
+        self._raw_leaf_node_matrix = leaf_node_matrix
+        self.y_ = y
+        #self._node_data_generator = self.#self._make_node_data_generator(y, leaf_node_matrix)
+        self._leaf_node_weights = self._calculate_node_weights(y, leaf_node_matrix, node_rank_func)
+        self._encoder = encoder
+        self._leaf_node_matrix = self._make_weighted_query_space(y, leaf_node_matrix, node_data_rank_func)# <- try making this a property
         return self
 
     def _transform_query_matrix(self, X):
 
         return  self._make_weighted_query_vector(
-            agg_node_weights = self.leaf_node_weights,
-            node_matrix = self.encoder.transform(self.estimator.apply(X)))
+            agg_node_weights = self._leaf_node_weights,
+            node_matrix = self._encoder.transform(self.estimator.apply(X)))
 
 
     def _query_idx_and_sim(self, X, n_neighbors, lower_bound, beta, gamma):
         idx, sim = cos_sim_query(
-            self._transform_query_matrix(X), self.leaf_node_matrix, n_neighbors=n_neighbors,
+            self._transform_query_matrix(X), self._leaf_node_matrix, n_neighbors=n_neighbors,
             lower_bound=lower_bound, beta = beta, gamma = gamma)
         return idx, sim
 
@@ -105,7 +129,7 @@ class EnsembleTreesDensityMixin():
 
         idx, sim = cos_sim_query(
             self._transform_query_matrix(X),
-            self.leaf_node_matrix,
+            self._leaf_node_matrix,
             n_neighbors=n_neighbors,
             lower_bound=lower_bound,
             beta = beta,
@@ -134,17 +158,19 @@ class EnsembleTreesDensityMixin():
         '''
 
         if not node_rank_func is None:
-            node_data_generator = self._make_node_data_generator(y, node_matrix)
+
             # cannot call in a vectorized fashion because data from nodes may have different sizes
             if callable(node_rank_func):
                 pass
             else:
                 node_rank_func = AVALIBLE_NODE_AGG[node_rank_func]
 
-            node_weights = Parallel(n_jobs=-1, verbose=0,
-                               **_joblib_parallel_args(prefer="threads"))(
-                delayed(node_rank_func)(X)
-                for X in node_data_generator)
+            #node_weights = Parallel(n_jobs=-1, verbose=0,
+            #                   **_joblib_parallel_args(prefer="threads"))(
+            #    delayed(node_rank_func)(X)
+            #    for X in self._node_data_generator)
+            node_weights = [node_rank_func(X) for X in self._node_data_generator]
+
         else:
             node_weights = np.ones(node_matrix.shape[1])
 
@@ -162,19 +188,21 @@ class EnsembleTreesDensityMixin():
         else:
             node_data_rank_func = AVALIBLE_DATAPOINT_WEIGHT_FUNC[node_data_rank_func]
 
-        node_data_generator = self._make_node_data_generator(y, node_matrix)
         #datapoint_node_weights = Parallel(n_jobs=1, verbose=0,
         #                   **_joblib_parallel_args(prefer="threads"))(
         #    delayed(node_data_rank_func)(X)
         #    for X in node_data_generator)
 
-        datapoint_node_weights = [node_data_rank_func(node_data) for node_data in node_data_generator]
+        datapoint_node_weights = [node_data_rank_func(node_data) for node_data in self._node_data_generator]
         return datapoint_node_weights
 
     def _make_node_data_generator(self, y, node_matrix):
-        nodes = node_matrix.tocoo().col
-        idxs = node_matrix.tocoo().row
-        return (y[idxs[nodes == i]] for i in tqdm([*range(node_matrix.shape[1])]))
+        s1 = node_matrix.sum(axis = 0).cumsum().A.astype(int).flatten()
+        s2 = np.concatenate([[0],s1[:-1]])
+        slices = [slice(i[0],i[1]) for i in zip(s2,s1)]
+        idxs = node_matrix.tocsc().indices
+        idxs = [idxs[s] for s in slices]
+        return (y[idx] for idx in tqdm(idxs))
 
     def _handle_sample_weights(self, weight_func, sim, alpha):
         '''
@@ -224,9 +252,10 @@ class EnsembleTreesDensityMixin():
 
 class SimilarityTreeEnsemble(EnsembleTreesDensityMixin):
 
-    def __init__(self, estimator, alpha = 1, beta = 1, gamma = 1, node_rank_func = 'expected_likelihood',
-                 node_data_rank_func = 'kde_likelihood',n_neighbors = 30, lower_bound = 0.0):
+    def __init__(self, estimator, alpha = 1, beta = 1, gamma = 1, node_rank_func = 'inverse_log_variance',
+                 node_data_rank_func = None,n_neighbors = 30, lower_bound = 0.0):
 
+        assert estimator.min_samples_leaf >= 3, 'min_samples_leaf should be greater than 2'
         self.estimator = estimator
         self.n_neighbors = n_neighbors
         self.lower_bound = lower_bound
@@ -244,14 +273,14 @@ class SimilarityTreeEnsemble(EnsembleTreesDensityMixin):
         self.estimator.fit(X,y)
         self._fit_leaf_node_matrix(
             X, y, node_rank_func = self.node_rank_func, node_data_rank_func = self.node_data_rank_func)# <- MAKE NODE WIEGHTED VERSION
-        self.y_ = y
+
         return self
 
     def sample(self, X, sample_size = 10, weights = None, n_neighbors = None,
                lower_bound = None, alpha = None, beta = None, gamma = None):
         '''wieghts should be callable (recieves array returns array of same shape) or None'''
-        n_neighbors, lower_bound, alpha, beta, gamma = self._handle_similarity_sample_parameters(n_neighbors, lower_bound,
-                                                                                    alpha, beta, gamma)
+        n_neighbors, lower_bound, alpha, beta, gamma = self._handle_similarity_sample_parameters(
+            n_neighbors, lower_bound,alpha, beta, gamma)
 
         return super()._similarity_sample(
             X = X, sample_size = sample_size, weights = weights, n_neighbors = n_neighbors,

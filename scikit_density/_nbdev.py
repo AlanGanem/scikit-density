@@ -15,16 +15,28 @@ index = {"expected_likelihood": "01_ensemble.ipynb",
          "KDE": "02_core.random_variable.ipynb",
          "RandomVariable": "02_core.random_variable.ipynb",
          "RVArray": "02_core.random_variable.ipynb",
+         "ctqdm": "03_utils.ipynb",
          "pad_to_shape": "03_utils.ipynb",
+         "sample_multi_dim": "03_utils.ipynb",
          "transform_similarity_weights": "03_utils.ipynb",
          "cos_sim_query": "03_utils.ipynb",
-         "sample_multi_dim": "03_utils.ipynb",
-         "ctqdm": "03_utils.ipynb",
-         "DelegateEstimatorMixIn": "03_utils.ipynb"}
+         "DelegateEstimatorMixIn": "03_utils.ipynb",
+         "quantile": "04_metrics.ipynb",
+         "quantile_value_sklearn": "04_metrics.ipynb",
+         "theoretical_entropy": "04_metrics.ipynb",
+         "kde_entropy": "04_metrics.ipynb",
+         "variance": "04_metrics.ipynb",
+         "covariance_matrix": "04_metrics.ipynb",
+         "bimodal_variance": "04_metrics.ipynb",
+         "gaussian_distance_entropy": "04_metrics.ipynb",
+         "expected_distance_gaussian_likelihood": "04_metrics.ipynb",
+         "distance_gaussian_likelihood": "04_metrics.ipynb",
+         "filter_borders": "04_metrics.ipynb"}
 
 modules = ["ensemble.py",
            "core/random_variable.py",
-           "utils.py"]
+           "utils.py",
+           "metrics.py"]
 
 doc_url = "https://alanmottaganem.github.io/scikit_density/"
 

@@ -1,10 +1,10 @@
 {
-  "Notebook": {
-    "Export to modules": "/export",
-    "Convert to html": "/export2html",
-    "Show doc": "/showdoc",
-    "Test functions": "/test",
-    "Core functions": "/core",
-    "Command line functions": "/cli"
+  "scikit_density": {
+    "Overview": "/",
+    "module name here": "core.html",
+    "Dev comments": "metrics.html",
+    "Meta Distributions": "core.random_variable.html",
+    "Helping Functions - ": "utils.html",
+    "Title": "neighbors.html"
   }
 }
