@@ -32,9 +32,9 @@ nb_path: "notebooks\04_metrics.ipynb"
 <div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
 <ul>
-<li>entropy</li>
-<li>kl div between dirichlet flat and quantile dist</li>
-<li></li>
+<li>[X] TODO: make entropy estimator with KDE</li>
+<li>[X] TODO: make quantile func</li>
+<li>[ ] TODO: make Gaussian Mixture entropy estimation</li>
 </ul>
 
 </div>
@@ -49,35 +49,31 @@ nb_path: "notebooks\04_metrics.ipynb"
 
 <div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<h1 id="Density-Metrics">Density Metrics<a class="anchor-link" href="#Density-Metrics"> </a></h1>
+<h1 id="Test-data">Test data<a class="anchor-link" href="#Test-data"> </a></h1>
 </div>
 </div>
 </div>
 <div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<h2 id="-"> <a class="anchor-link" href="#-"> </a></h2>
+<p>We are going to test utils using the following data:</p>
+
 </div>
 </div>
 </div>
     {% raw %}
     
 <div class="cell border-box-sizing code_cell rendered">
+<div class="input">
 
-<div class="output_wrapper">
-<div class="output">
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">warnings</span>
+<span class="kn">import</span> <span class="nn">seaborn</span> <span class="k">as</span> <span class="nn">sns</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s1">&#39;ignore&#39;</span><span class="p">)</span>
+</pre></div>
 
-<div class="output_area">
-
-
-<div class="output_markdown rendered_html output_subarea ">
-<h4 id="quantile" class="doc_header"><code>quantile</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L22" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>quantile</code>(<strong><code>y_true</code></strong>, <strong><code>pred_dist</code></strong>)</p>
-</blockquote>
-<p>checks in which quantile lies y_true, given the predicted distribution</p>
-
-</div>
-
-</div>
-
+    </div>
 </div>
 </div>
 
@@ -87,28 +83,30 @@ nb_path: "notebooks\04_metrics.ipynb"
     {% raw %}
     
 <div class="cell border-box-sizing code_cell rendered">
+<div class="input">
 
-<div class="output_wrapper">
-<div class="output">
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">y_dists</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="mi">200</span><span class="p">,</span><span class="mi">2</span><span class="p">)</span>
+<span class="n">y_true</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">)</span>
 
-<div class="output_area">
+<span class="n">y_dists_1d</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="mi">200</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">y_true_1d</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span>
+</pre></div>
 
-
-<div class="output_markdown rendered_html output_subarea ">
-<h4 id="quantile_value_sklearn" class="doc_header"><code>quantile_value_sklearn</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L30" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>quantile_value_sklearn</code>(<strong><code>y_true</code></strong>, <strong><code>pred_dist</code></strong>)</p>
-</blockquote>
-<p>checks in which quantile lies y_true, given the predicted distribution, using skleaerns QuantileTransformer</p>
-
-</div>
-
-</div>
-
+    </div>
 </div>
 </div>
 
 </div>
     {% endraw %}
 
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="kde_entropy"><a href="/scikit_density/metrics.html#kde_entropy"><code>kde_entropy</code></a><a class="anchor-link" href="#kde_entropy"> </a></h2>
+</div>
+</div>
+</div>
     {% raw %}
     
 <div class="cell border-box-sizing code_cell rendered">
@@ -120,31 +118,7 @@ nb_path: "notebooks\04_metrics.ipynb"
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="theoretical_entropy" class="doc_header"><code>theoretical_entropy</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L34" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>theoretical_entropy</code>(<strong><code>data</code></strong>, <strong><code>dist</code></strong>)</p>
-</blockquote>
-
-</div>
-
-</div>
-
-</div>
-</div>
-
-</div>
-    {% endraw %}
-
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
-
-<div class="output_wrapper">
-<div class="output">
-
-<div class="output_area">
-
-
-<div class="output_markdown rendered_html output_subarea ">
-<h4 id="kde_entropy" class="doc_header"><code>kde_entropy</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L37" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>kde_entropy</code>(<strong><code>data</code></strong>, <strong><code>sample_size</code></strong>=<em><code>10000</code></em>, <strong><code>bw</code></strong>=<em><code>'ISJ'</code></em>)</p>
+<h4 id="kde_entropy" class="doc_header"><code>kde_entropy</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L23" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>kde_entropy</code>(<strong><code>data</code></strong>, <strong><code>sample_size</code></strong>=<em><code>10000</code></em>, <strong><code>bw</code></strong>=<em><code>'ISJ'</code></em>)</p>
 </blockquote>
 <p>Calculates the entropy of multiple distributions
 input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_distribtuion)</p>
@@ -163,6 +137,92 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
     
 <div class="cell border-box-sizing code_cell rendered">
 
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p><a href="/scikit_density/metrics.html#kde_entropy"><code>kde_entropy</code></a> estimates a distribution of an aribtrary dimension random variable using kernel density estimation and calculates its entropy</p>
+
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">kde_entropy</span><span class="p">(</span><span class="n">y_dists</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>array([4.19584855, 4.43819543, 4.39191813, 4.44084663, 4.2976626 ,
+       4.43929067, 4.24074559, 4.24561533, 4.30936576, 4.22102025])</pre>
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%%time</span>it
+<span class="n">kde_entropy</span><span class="p">(</span><span class="n">y_dists</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>303 ms � 20 ms per loop (mean � std. dev. of 7 runs, 1 loop each)
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="quantile"><a href="/scikit_density/metrics.html#quantile"><code>quantile</code></a><a class="anchor-link" href="#quantile"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
 <div class="output_wrapper">
 <div class="output">
 
@@ -170,7 +230,367 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="variance" class="doc_header"><code>variance</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L45" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>variance</code>(<strong><code>data</code></strong>)</p>
+<h4 id="quantile" class="doc_header"><code>quantile</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L32" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>quantile</code>(<strong><code>y_true</code></strong>, <strong><code>pred_dist</code></strong>)</p>
+</blockquote>
+<p>checks in which quantile lies y_true, given the predicted distribution</p>
+
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p><a href="/scikit_density/metrics.html#quantile"><code>quantile</code></a> checks the quantile of each dimension of an observation <code>y_true</code> given an empirical distribution <code>y_dists</code></p>
+
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">quantile</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span> <span class="n">y_dists</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>array([[[0.725, 0.015],
+        [0.945, 0.695],
+        [0.54 , 0.17 ],
+        [0.05 , 0.34 ],
+        [0.77 , 0.11 ],
+        [0.625, 0.705],
+        [0.925, 0.24 ],
+        [0.705, 0.805],
+        [0.99 , 0.67 ],
+        [0.18 , 0.655]]])</pre>
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%%time</span>it
+<span class="n">quantile</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span> <span class="n">y_dists</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>150 탎 � 3.09 탎 per loop (mean � std. dev. of 7 runs, 10000 loops each)
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="quantile_sklearn"><a href="/scikit_density/metrics.html#quantile_sklearn"><code>quantile_sklearn</code></a><a class="anchor-link" href="#quantile_sklearn"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+<div class="output_markdown rendered_html output_subarea ">
+<h4 id="quantile_sklearn" class="doc_header"><code>quantile_sklearn</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L41" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>quantile_sklearn</code>(<strong><code>y_true</code></strong>, <strong><code>pred_dist</code></strong>)</p>
+</blockquote>
+<p>checks in which quantile lies y_true, given the predicted distribution, using skleaerns QuantileTransformer</p>
+
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p><a href="/scikit_density/metrics.html#quantile_sklearn"><code>quantile_sklearn</code></a> does the same as <a href="/scikit_density/metrics.html#quantile"><code>quantile</code></a>, but with <code>sklearn</code>s <code>QuantileTransformer</code></p>
+
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">quantile_sklearn</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span> <span class="n">y_dists</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>array([[[0.7278008 , 0.01447408]],
+
+       [[0.9496229 , 0.69639994]],
+
+       [[0.53860615, 0.1690896 ]],
+
+       [[0.04560922, 0.34077751]],
+
+       [[0.76982081, 0.10779354]],
+
+       [[0.62630501, 0.70365157]],
+
+       [[0.92464003, 0.24046056]],
+
+       [[0.70444373, 0.80482178]],
+
+       [[0.99463003, 0.66871387]],
+
+       [[0.17602332, 0.65460287]]])</pre>
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%%time</span>it
+<span class="n">quantile_sklearn</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span> <span class="n">y_dists</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>5.43 ms � 85.1 탎 per loop (mean � std. dev. of 7 runs, 100 loops each)
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="theoretical_entropy"><a href="/scikit_density/metrics.html#theoretical_entropy"><code>theoretical_entropy</code></a><a class="anchor-link" href="#theoretical_entropy"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+<div class="output_markdown rendered_html output_subarea ">
+<h4 id="theoretical_entropy" class="doc_header"><code>theoretical_entropy</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L49" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>theoretical_entropy</code>(<strong><code>data</code></strong>, <strong><code>dist</code></strong>=<em><code>'norm'</code></em>)</p>
+</blockquote>
+<p>returns the entropy of the maximum likelihood estiation of <code>dist</code> given <code>data</code>
+dist should be one dimensional for cases when <code>dist</code> != 'kde'</p>
+
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p><a href="/scikit_density/metrics.html#theoretical_entropy"><code>theoretical_entropy</code></a> returns the entropy of the maximum likelihood estiation of <code>dist</code> given <code>data</code>
+    dist should be one dimensional for cases when <code>dist</code> != 'kde'</p>
+
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">theoretical_entropy</span><span class="p">(</span><span class="n">y_dists_1d</span><span class="p">,</span> <span class="n">dist</span> <span class="o">=</span> <span class="s1">&#39;norm&#39;</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>array([1.30701586, 1.51849768, 1.49686731, 1.49346887, 1.33472044,
+       1.33898642, 1.3316598 , 1.44444205, 1.43230334, 1.49410763])</pre>
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%%time</span>it
+<span class="n">theoretical_entropy</span><span class="p">(</span><span class="n">y_dists_1d</span><span class="p">,</span> <span class="n">dist</span> <span class="o">=</span> <span class="s1">&#39;norm&#39;</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>6.9 ms � 187 탎 per loop (mean � std. dev. of 7 runs, 100 loops each)
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="variance"><code>variance</code><a class="anchor-link" href="#variance"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+<div class="output_markdown rendered_html output_subarea ">
+<h4 id="marginal_variance" class="doc_header"><code>marginal_variance</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L58" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>marginal_variance</code>(<strong><code>data</code></strong>)</p>
 </blockquote>
 <p>Calculates the variance for each dimension (marginal) of multiple distributions
 input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_distribtuion)</p>
@@ -189,6 +609,69 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
     
 <div class="cell border-box-sizing code_cell rendered">
 
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p><a href="/scikit_density/metrics.html#marginal_variance"><code>marginal_variance</code></a> Calculates the variance for each dimension (marginal) of multiple distributions
+    input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_distribtuion)</p>
+
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">marginal_variance</span><span class="p">(</span><span class="n">y_dists</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>array([[1.07997805, 0.97298247],
+       [1.08478207, 0.80053107],
+       [1.04474869, 0.90155785],
+       [1.06384356, 0.96478837],
+       [1.05452459, 0.91047929],
+       [0.90663148, 1.10136982],
+       [1.01474701, 0.95389312],
+       [0.86083731, 0.94958826],
+       [0.96977624, 1.11934001],
+       [0.92623992, 1.04994311]])</pre>
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="covariance_matrix"><a href="/scikit_density/metrics.html#covariance_matrix"><code>covariance_matrix</code></a><a class="anchor-link" href="#covariance_matrix"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
 <div class="output_wrapper">
 <div class="output">
 
@@ -196,7 +679,7 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="covariance_matrix" class="doc_header"><code>covariance_matrix</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L53" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>covariance_matrix</code>(<strong><code>data</code></strong>)</p>
+<h4 id="covariance_matrix" class="doc_header"><code>covariance_matrix</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L67" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>covariance_matrix</code>(<strong><code>data</code></strong>)</p>
 </blockquote>
 <p>Calculates the variance for each dimension (marginal) of multiple distributions
 input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_distribtuion)</p>
@@ -215,6 +698,19 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
     
 <div class="cell border-box-sizing code_cell rendered">
 
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="bimodal_split"><a href="/scikit_density/metrics.html#bimodal_split"><code>bimodal_split</code></a><a class="anchor-link" href="#bimodal_split"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
 <div class="output_wrapper">
 <div class="output">
 
@@ -222,10 +718,9 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="bimodal_variance" class="doc_header"><code>bimodal_variance</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L60" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>bimodal_variance</code>(<strong><code>data</code></strong>, <strong><code>pct_conv</code></strong>=<em><code>0.05</code></em>, <strong><code>lb</code></strong>=<em><code>0.1</code></em>, <strong><code>ub</code></strong>=<em><code>0.9</code></em>)</p>
+<h4 id="bimodal_split" class="doc_header"><code>bimodal_split</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L75" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>bimodal_split</code>(<strong><code>data</code></strong>, <strong><code>filter_size</code></strong>=<em><code>3</code></em>, <strong><code>lb</code></strong>=<em><code>0.1</code></em>, <strong><code>ub</code></strong>=<em><code>0.9</code></em>)</p>
 </blockquote>
-<p>splits data in two according to the highest value of the derivative of cpdf
-and takes the wieghted average of the variance of the two ditributions generated</p>
+<p>reutrns siplitting point of single distribution in two according to the highest value of the derivative of cpdf</p>
 
 </div>
 
@@ -241,6 +736,91 @@ and takes the wieghted average of the variance of the two ditributions generated
     
 <div class="cell border-box-sizing code_cell rendered">
 
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p><a href="/scikit_density/metrics.html#bimodal_split"><code>bimodal_split</code></a> reutrns siplitting point of single distribution in two according to the highest value of the derivative of cpdf</p>
+
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">bimodal_split</span><span class="p">(</span><span class="n">y_dists</span><span class="p">[</span><span class="mi">0</span><span class="p">,:,</span><span class="mi">0</span><span class="p">],</span> <span class="n">filter_size</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span> <span class="n">lb</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span><span class="n">ub</span> <span class="o">=</span> <span class="mf">0.9</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>-1.4383953140490906</pre>
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%%time</span>it
+<span class="n">bimodal_split</span><span class="p">(</span><span class="n">y_dists</span><span class="p">[</span><span class="mi">0</span><span class="p">,:,</span><span class="mi">0</span><span class="p">],</span> <span class="n">filter_size</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span> <span class="n">lb</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span><span class="n">ub</span> <span class="o">=</span> <span class="mf">0.9</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>22.4 탎 � 667 ns per loop (mean � std. dev. of 7 runs, 10000 loops each)
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="mad"><a href="/scikit_density/metrics.html#mad"><code>mad</code></a><a class="anchor-link" href="#mad"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
 <div class="output_wrapper">
 <div class="output">
 
@@ -248,7 +828,166 @@ and takes the wieghted average of the variance of the two ditributions generated
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="gaussian_distance_entropy" class="doc_header"><code>gaussian_distance_entropy</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L78" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>gaussian_distance_entropy</code>(<strong><code>data</code></strong>)</p>
+<h4 id="mad" class="doc_header"><code>mad</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L92" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>mad</code>(<strong><code>data</code></strong>)</p>
+</blockquote>
+<p>calculates mean average deviance (a robust version of standard deviation)</p>
+
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="bimodal_var"><a href="/scikit_density/metrics.html#bimodal_var"><code>bimodal_var</code></a><a class="anchor-link" href="#bimodal_var"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+<div class="output_markdown rendered_html output_subarea ">
+<h4 id="bimodal_var" class="doc_header"><code>bimodal_var</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L100" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>bimodal_var</code>(<strong><code>data</code></strong>, <strong><code>filter_size</code></strong>=<em><code>0.05</code></em>, <strong><code>lb</code></strong>=<em><code>0.1</code></em>, <strong><code>ub</code></strong>=<em><code>0.9</code></em>)</p>
+</blockquote>
+<p>returns weighted marginal variance of splitted data in two according to the highest value of the derivative of cpdf
+returns a variance array of shape (n_dists, n_dims)</p>
+
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p><a href="/scikit_density/metrics.html#bimodal_var"><code>bimodal_var</code></a> returns weighted variance of splitted data in two according to the highest value of the derivative of cpdf
+    returns a variance array of shape (n_dists, n_dims)</p>
+
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">bimodal_var</span><span class="p">(</span><span class="n">y_dists</span><span class="p">,</span> <span class="n">filter_size</span> <span class="o">=</span> <span class="mf">0.05</span><span class="p">,</span> <span class="n">lb</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span><span class="n">ub</span> <span class="o">=</span> <span class="mf">0.9</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>array([[0.34154432, 0.37242164],
+       [0.30069423, 0.37842003],
+       [0.33386546, 0.31060919],
+       [0.31703943, 0.36906463],
+       [0.32809221, 0.40863546],
+       [0.38355878, 0.32805146],
+       [0.30257438, 0.40595029],
+       [0.42650975, 0.45140764],
+       [0.28671314, 0.41607512],
+       [0.39736197, 0.31993504]])</pre>
+</div>
+
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="o">%%time</span>it
+<span class="n">bimodal_var</span><span class="p">(</span><span class="n">y_dists</span><span class="p">,</span> <span class="n">filter_size</span> <span class="o">=</span> <span class="mf">0.05</span><span class="p">,</span> <span class="n">lb</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span><span class="n">ub</span> <span class="o">=</span> <span class="mf">0.9</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>1.31 ms � 20.6 탎 per loop (mean � std. dev. of 7 runs, 1000 loops each)
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="gaussian_distance_entropy"><a href="/scikit_density/metrics.html#gaussian_distance_entropy"><code>gaussian_distance_entropy</code></a><a class="anchor-link" href="#gaussian_distance_entropy"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+<div class="output_markdown rendered_html output_subarea ">
+<h4 id="gaussian_distance_entropy" class="doc_header"><code>gaussian_distance_entropy</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L120" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>gaussian_distance_entropy</code>(<strong><code>data</code></strong>)</p>
 </blockquote>
 <p>calculates the entropy of the distribution of distances from centroid of points in dist, assuming normal distribution</p>
 
@@ -266,6 +1005,19 @@ and takes the wieghted average of the variance of the two ditributions generated
     
 <div class="cell border-box-sizing code_cell rendered">
 
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="expected_distance_gaussian_likelihood"><a href="/scikit_density/metrics.html#expected_distance_gaussian_likelihood"><code>expected_distance_gaussian_likelihood</code></a><a class="anchor-link" href="#expected_distance_gaussian_likelihood"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
 <div class="output_wrapper">
 <div class="output">
 
@@ -273,7 +1025,7 @@ and takes the wieghted average of the variance of the two ditributions generated
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="expected_distance_gaussian_likelihood" class="doc_header"><code>expected_distance_gaussian_likelihood</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L84" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>expected_distance_gaussian_likelihood</code>(<strong><code>data</code></strong>)</p>
+<h4 id="expected_distance_gaussian_likelihood" class="doc_header"><code>expected_distance_gaussian_likelihood</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L127" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>expected_distance_gaussian_likelihood</code>(<strong><code>data</code></strong>)</p>
 </blockquote>
 <p>calculates the expected likelihood of the distances from centroid of samples in distributions in dist
 input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_distribtuion)</p>
@@ -292,6 +1044,19 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
     
 <div class="cell border-box-sizing code_cell rendered">
 
+</div>
+    {% endraw %}
+
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="distance_gaussian_likelihood"><a href="/scikit_density/metrics.html#distance_gaussian_likelihood"><code>distance_gaussian_likelihood</code></a><a class="anchor-link" href="#distance_gaussian_likelihood"> </a></h2>
+</div>
+</div>
+</div>
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+
 <div class="output_wrapper">
 <div class="output">
 
@@ -299,7 +1064,7 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="distance_gaussian_likelihood" class="doc_header"><code>distance_gaussian_likelihood</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L92" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>distance_gaussian_likelihood</code>(<strong><code>data</code></strong>)</p>
+<h4 id="distance_gaussian_likelihood" class="doc_header"><code>distance_gaussian_likelihood</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L136" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>distance_gaussian_likelihood</code>(<strong><code>data</code></strong>)</p>
 </blockquote>
 <p>calculates the expected likelihood of the distances from the centroid of samples in dist</p>
 
@@ -320,6 +1085,12 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 </div>
     {% endraw %}
 
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="make_outlier_filter"><a href="/scikit_density/metrics.html#make_outlier_filter"><code>make_outlier_filter</code></a><a class="anchor-link" href="#make_outlier_filter"> </a></h2>
+</div>
+</div>
+</div>
     {% raw %}
     
 <div class="cell border-box-sizing code_cell rendered">
@@ -331,7 +1102,7 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 
 
 <div class="output_markdown rendered_html output_subarea ">
-<h4 id="filter_borders" class="doc_header"><code>filter_borders</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L116" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>filter_borders</code>(<strong><code>data</code></strong>, <strong><code>lb</code></strong>=<em><code>0.05</code></em>, <strong><code>ub</code></strong>=<em><code>0.95</code></em>)</p>
+<h4 id="make_outlier_filter" class="doc_header"><code>make_outlier_filter</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L149" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>make_outlier_filter</code>(<strong><code>data</code></strong>, <strong><code>lb</code></strong>=<em><code>25</code></em>, <strong><code>ub</code></strong>=<em><code>75</code></em>, <strong><code>c</code></strong>=<em><code>1</code></em>)</p>
 </blockquote>
 
 </div>
@@ -351,37 +1122,15 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 </div>
     {% endraw %}
 
+<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<h2 id="filter_borders"><a href="/scikit_density/metrics.html#filter_borders"><code>filter_borders</code></a><a class="anchor-link" href="#filter_borders"> </a></h2>
+</div>
+</div>
+</div>
     {% raw %}
     
 <div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="n">dists</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">300</span><span class="p">,</span><span class="mi">299</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span>
-<span class="n">y_true</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">300</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span>
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-</div>
-    {% endraw %}
-
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="n">variance</span><span class="p">(</span><span class="n">dists</span><span class="p">)</span>
-</pre></div>
-
-    </div>
-</div>
-</div>
 
 <div class="output_wrapper">
 <div class="output">
@@ -389,308 +1138,10 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
 <div class="output_area">
 
 
+<div class="output_markdown rendered_html output_subarea ">
+<h4 id="filter_borders" class="doc_header"><code>filter_borders</code><a href="https://github.com/alanmottaganem/scikit_density/tree/master/scikit_density/metrics.py#L161" class="source_link" style="float:right">[source]</a></h4><blockquote><p><code>filter_borders</code>(<strong><code>data</code></strong>, <strong><code>lb</code></strong>=<em><code>0.05</code></em>, <strong><code>ub</code></strong>=<em><code>0.95</code></em>)</p>
+</blockquote>
 
-<div class="output_text output_subarea output_execute_result">
-<pre>array([[1.03840303],
-       [0.99429577],
-       [0.85657209],
-       [1.00802389],
-       [0.91129206],
-       [1.20180636],
-       [0.96826585],
-       [1.13715654],
-       [0.98933793],
-       [1.01014119],
-       [1.01212786],
-       [0.84589956],
-       [0.98587586],
-       [0.91998712],
-       [0.98106139],
-       [1.05764596],
-       [0.92059322],
-       [0.9275175 ],
-       [0.96779067],
-       [1.00345712],
-       [0.93999219],
-       [1.02603654],
-       [1.01191194],
-       [1.0282939 ],
-       [0.79073409],
-       [1.04607534],
-       [1.23230325],
-       [0.89371801],
-       [0.97529275],
-       [1.12663384],
-       [0.97863051],
-       [1.00237994],
-       [0.94278942],
-       [1.00163499],
-       [0.92007089],
-       [1.063153  ],
-       [1.15099136],
-       [0.90896666],
-       [0.96672634],
-       [0.85489839],
-       [0.81842303],
-       [1.11224568],
-       [1.07926474],
-       [0.96433255],
-       [0.9698845 ],
-       [1.0247836 ],
-       [0.97963916],
-       [1.0448244 ],
-       [0.98820549],
-       [0.95671607],
-       [0.90803816],
-       [0.93116243],
-       [0.88226581],
-       [0.98213852],
-       [0.99873404],
-       [0.93903115],
-       [0.95683516],
-       [1.09178046],
-       [0.95422254],
-       [1.1331506 ],
-       [0.92644435],
-       [1.04910836],
-       [1.01891316],
-       [0.90200509],
-       [1.04233429],
-       [0.92649198],
-       [1.0256578 ],
-       [1.09384466],
-       [1.14402216],
-       [0.98526877],
-       [0.99228097],
-       [1.05197826],
-       [0.98262134],
-       [0.99464192],
-       [1.10457393],
-       [1.02678168],
-       [1.01134076],
-       [0.99834716],
-       [1.025599  ],
-       [0.9758819 ],
-       [0.9129809 ],
-       [1.09050782],
-       [1.16196864],
-       [0.83476783],
-       [0.93541305],
-       [0.91410671],
-       [0.90955998],
-       [1.02535814],
-       [1.02712527],
-       [1.02694281],
-       [1.08355484],
-       [1.08873492],
-       [1.20966182],
-       [1.19220794],
-       [1.05030184],
-       [0.93399751],
-       [0.9917652 ],
-       [1.06004565],
-       [1.08680079],
-       [1.05666066],
-       [1.02154612],
-       [1.02449852],
-       [0.89269918],
-       [0.92330752],
-       [0.91083558],
-       [1.0587761 ],
-       [0.99050056],
-       [0.81863282],
-       [0.98526101],
-       [0.94994256],
-       [0.96735557],
-       [1.05310058],
-       [1.11493262],
-       [0.87348155],
-       [0.91794879],
-       [1.1166183 ],
-       [1.04647397],
-       [0.73341393],
-       [0.95488666],
-       [0.89754128],
-       [1.15532387],
-       [0.98150191],
-       [1.08263729],
-       [0.96175106],
-       [0.94114602],
-       [1.14336895],
-       [1.01849128],
-       [0.82481809],
-       [0.98399763],
-       [1.07972705],
-       [0.96412657],
-       [1.15490193],
-       [1.09327662],
-       [0.9924194 ],
-       [1.12566467],
-       [1.07287258],
-       [0.91628569],
-       [0.96626795],
-       [1.02339364],
-       [1.12017916],
-       [0.97826841],
-       [1.1062597 ],
-       [1.02414359],
-       [1.13513346],
-       [1.18283075],
-       [1.02581848],
-       [0.97261326],
-       [0.89166084],
-       [0.95275565],
-       [0.98428088],
-       [1.07209906],
-       [0.90173101],
-       [0.99216001],
-       [1.0336168 ],
-       [0.87572135],
-       [0.9952793 ],
-       [0.99409737],
-       [0.93485583],
-       [1.09649625],
-       [1.03942794],
-       [1.02732206],
-       [0.87141962],
-       [0.90008927],
-       [0.83246829],
-       [0.9869584 ],
-       [1.00152409],
-       [1.01062808],
-       [0.97696133],
-       [1.03853761],
-       [1.05435834],
-       [1.02217624],
-       [1.02580851],
-       [1.02537868],
-       [0.98988245],
-       [1.05017465],
-       [1.06681643],
-       [0.94929404],
-       [0.97295938],
-       [1.05711324],
-       [1.0106678 ],
-       [1.0423846 ],
-       [0.88169043],
-       [0.93494655],
-       [0.88576804],
-       [1.09723158],
-       [1.08355258],
-       [0.79605872],
-       [0.90577773],
-       [0.96471892],
-       [1.02179928],
-       [1.03849257],
-       [1.06357589],
-       [1.10877957],
-       [0.97935357],
-       [1.09807433],
-       [0.865439  ],
-       [1.05096085],
-       [0.98641062],
-       [0.9192955 ],
-       [1.07751987],
-       [1.00054089],
-       [0.92483599],
-       [0.96943233],
-       [1.09898071],
-       [1.03203089],
-       [1.07591711],
-       [1.00010204],
-       [1.05985296],
-       [0.94320307],
-       [0.93180181],
-       [0.92569137],
-       [0.89955436],
-       [0.95551733],
-       [0.98434298],
-       [0.94068038],
-       [1.01248974],
-       [0.98067281],
-       [0.96689637],
-       [0.95254134],
-       [0.99429662],
-       [0.91978574],
-       [0.9344765 ],
-       [0.98353736],
-       [0.90205902],
-       [0.94076333],
-       [0.94587185],
-       [0.80526695],
-       [0.80250611],
-       [0.96776603],
-       [0.89811238],
-       [1.01467244],
-       [0.93302514],
-       [1.10372158],
-       [1.07427376],
-       [0.91599409],
-       [0.84999382],
-       [1.09412376],
-       [0.99040158],
-       [0.9221742 ],
-       [1.10989725],
-       [0.95916012],
-       [0.94434333],
-       [1.16167827],
-       [1.12711018],
-       [1.00907841],
-       [0.909591  ],
-       [1.07680042],
-       [1.02786556],
-       [0.8698969 ],
-       [0.91282623],
-       [1.07146085],
-       [0.97431069],
-       [0.83242936],
-       [1.13570755],
-       [0.92629121],
-       [1.0552001 ],
-       [1.02793069],
-       [1.021109  ],
-       [0.88857108],
-       [1.03644297],
-       [0.96547038],
-       [0.949991  ],
-       [1.05825013],
-       [1.04953178],
-       [0.97140993],
-       [0.8944238 ],
-       [0.92878373],
-       [1.13105882],
-       [0.89852389],
-       [0.9720067 ],
-       [1.01895668],
-       [1.00199209],
-       [0.98269071],
-       [0.97612296],
-       [1.11566123],
-       [0.96280184],
-       [0.91621385],
-       [0.96519758],
-       [0.96569782],
-       [0.88961651],
-       [1.07706851],
-       [1.00506202],
-       [1.07057367],
-       [1.01222912],
-       [1.05630032],
-       [1.10487504],
-       [0.95491232],
-       [1.06097452],
-       [0.88998126],
-       [0.95894426],
-       [1.15284461],
-       [0.92330558],
-       [0.92404703],
-       [0.97079551],
-       [0.85589905],
-       [0.92470705],
-       [1.02803995],
-       [1.05588743],
-       [0.92762107],
-       [0.8176014 ]])</pre>
 </div>
 
 </div>
@@ -704,32 +1155,6 @@ input should be of shape (n_distributions, n_sample_per_distribution, n_dims_in_
     {% raw %}
     
 <div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="n">kde_entropy</span><span class="p">(</span><span class="n">quantile</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span><span class="n">dists</span><span class="p">))</span>
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-<div class="output_wrapper">
-<div class="output">
-
-<div class="output_area">
-
-
-
-<div class="output_text output_subarea output_execute_result">
-<pre>array([0.28690482])</pre>
-</div>
-
-</div>
-
-</div>
-</div>
 
 </div>
     {% endraw %}

@@ -5,6 +5,7 @@
     "Dev comments": "metrics.html",
     "Meta Distributions": "core.random_variable.html",
     "Helping Functions - ": "utils.html",
-    "Title": "neighbors.html"
+    "Weighted KNN DensityEstimator": "neighbors.html",
+    "Title": "kde_baesyan_nets.html"
   }
 }

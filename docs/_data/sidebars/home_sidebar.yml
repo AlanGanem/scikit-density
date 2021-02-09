@@ -22,8 +22,11 @@ entries:
       title: 'Helping Functions - '
       url: utils.html
     - output: web,pdf
-      title: Title
+      title: Weighted KNN DensityEstimator
       url: neighbors.html
+    - output: web,pdf
+      title: Title
+      url: kde_baesyan_nets.html
     output: web
     title: scikit_density
   output: web

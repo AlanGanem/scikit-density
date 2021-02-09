@@ -5,6 +5,7 @@ __all__ = ['KDE', 'RandomVariable', 'RVArray']
 # Cell
 from functools import partial
 
+import scipy
 import scipy.stats as stats
 import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
@@ -20,7 +21,7 @@ import KDEpy as kdepy
 
 class KDE():
 
-    def __init__(self, kernel = 'gaussian', bw = 'ISJ', alpha = 0.5, implementation = 'auto'):
+    def __init__(self, kernel = 'gaussian', bw = 'ISJ', alpha = 0.0, implementation = 'auto'):
         self.kernel = kernel
         self.bw = bw
         self.alpha = alpha
@@ -52,22 +53,29 @@ class KDE():
         if self.implementation == 'auto':
             #select kde implementation according to scale
             # FFT is faster but its slower to evalute due to grid evaluation which scales as a power of grid resolution
-            # Tiping point is arround 10^2.5 (approx 300) samples for 1D distributions
-            if X.shape[0] > 300:
+            # Tiping point is arround 10^2.6 (approx 400) samples for 1D distributions
+            if X.shape[0] >= 400:
                 # find marginal bws for multidim data
-                bw = [kdepy.FFTKDE(bw = self.bw).bw(X[:,i:i+1]) for i in range(X.shape[-1])]
+                if self.bw.__class__ == str: bw = [kdepy.FFTKDE(bw = self.bw).bw(X[:,i:i+1]) for i in range(X.shape[-1])]
+                else: bw = self.bw
                 self.estimator = kdepy.FFTKDE(kernel = self.kernel, bw = bw, )
+                self._bw_value = bw
             else:
-                bw = self.bw if not self.bw == 'ISJ' else 'silverman'
-                self.estimator = awkde.GaussianKDE(glob_bw = bw, alpha = self.alpha, )
+                if self.bw.__class__ == str: bw = self.bw if not self.bw == 'ISJ' else 'silverman'
+                else: bw = self.bw
+                self.estimator = awkde.GaussianKDE(glob_bw = bw, alpha = self.alpha,)
+                self._bw_value = bw
 
         # if not auto then run 'adaptative' or 'FFTKDE'
         elif self.implementation == 'adaptative':
-            self.estimator = awkde.GaussianKDE(glob_bw = self.bw, alpha = self.alpha, )
+            self.estimator = awkde.GaussianKDE(glob_bw = self.bw, alpha = self.alpha,)
+            self._bw_value = bw
         else:
             # find marginal bws for multidim data
-            bw = [kdepy.FFTKDE(bw = self.bw).bw(X[:,i:i+1]) for i in range(X.shape[-1])]
+            if self.bw.__class__ == str: bw = [kdepy.FFTKDE(bw = self.bw).bw(X[:,i:i+1]) for i in range(X.shape[-1])]
+            else: bw = self.bw
             self.estimator = kdepy.FFTKDE(kernel = self.kernel, bw = bw, )
+            self._bw_value = bw
 
         self.estimator.fit(X)
         return self
@@ -90,25 +98,37 @@ class KDE():
     def pdf(self, data):
         return self.evaluate(data)
 
-    def rvs(self, size = 1, random_state = None):
+    def rvs(self, sample_size = 1, random_state = None):
         if isinstance(self.estimator, awkde.GaussianKDE):
-            return self.estimator.sample(n_samples = size, random_state=random_state)
+            return self.estimator.sample(n_samples = sample_size, random_state=random_state)
         else:
             values, probas = self.estimator.evaluate(self.kde_resolution)
-            sampled_idxs = np.random.choice([*range(values.shape[0])], size = size)
+            sampled_idxs = np.random.choice([*range(values.shape[0])], size = sample_size)
             return values[sampled_idxs]
 
-    def sample(self, size = 1, random_state = None):
-        return self.rvs(size, random_state)
+    def sample(self, sample_size = 1, random_state = None):
+        return self.rvs(sample_size, random_state)
 
     def entropy(self, sample_size = 100):
         if isinstance(self.estimator, awkde.GaussianKDE):
-            return np.mean(-np.log2(self.pdf(self.rvs(size = sample_size))))
+            return np.mean(-np.log2(self.evaluate(self.rvs(sample_size = sample_size))))
         else:
             kde_pdf = self.estimator.evaluate(self.kde_resolution)[1]
             kde_pdf[kde_pdf<0] = 0 #assert non negativity
             kde_pdf = np.random.choice(kde_pdf,p = kde_pdf/kde_pdf.sum(), size = sample_size)
             return np.mean(-np.log2(kde_pdf))
+
+    def cdf(self, data, sample_size = 100):
+        #estimate using sampling and QuantileTransformer since integration is too costly
+        samples = self.sample(sample_size = sample_size)
+        return QuantileTransformer().fit(samples).transform(data)
+
+    def ppf(self, data, sample_size = 100):
+        #estimate using sampling and QuantileTransformer since integration is too costly
+        data = np.array(data)
+        assert (data.min() >= 0) and (data.max() <= 1), 'data contains values <= 0 or >= 1'
+        samples = self.sample(sample_size = sample_size)
+        return QuantileTransformer().fit(samples).inverse_transform(data)
 
 
 
@@ -122,7 +142,7 @@ class RandomVariable():
 
     @classmethod
     def from_weights(cls, values, weights, n_samples = 100):
-        data = np.random.choice(values,size = n_samples, p = weights)
+        data = np.random.choice(values, size = n_samples, p = weights)
         return cls.__init__(data,)
 
     def __init__(self, data, verbose = False):
@@ -235,9 +255,9 @@ class RandomVariable():
             else:
                 return candidate_value
 
-    def sample(self, size, dist = 'empirical', **kwargs):
+    def sample(self, sample_size, dist = 'empirical', **kwargs):
         if dist == 'empirical':
-            sampled_idxs = np.random.choice([*range(self.samples.shape[0])], size = size, **kwargs)
+            sampled_idxs = np.random.choice([*range(self.samples.shape[0])], size = sample_size, **kwargs)
             return self.samples[sampled_idxs]
         else:
             return self[dist].rvs(size = size, **kwargs)
