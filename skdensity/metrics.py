@@ -143,7 +143,7 @@ def cov_smallest_distance(data, agg_func = np.mean):
     _assert_dim_3d(data)
     data = np.sort(data, axis = 1)
     data = np.diff(data, axis = 1)
-    results = np.array([np.cov(i) for i in data])
+    results = np.array([np.cov(i, rowvar = False) for i in data])
     return results
 
 # Cell

@@ -45,27 +45,38 @@ def _add_n_dists_axis(X):
     when the array represents a single dist of shape (n_samples, n_dims),
     returns a 3 axis representation (1[n_dists], n_samples, n_dims)
     '''
-    _assert_dim_2d(X)
-    return X.reshape(1,*X.shape)
+    try:
+        _assert_dim_3d(X)
+        return X
+    except:
+        _assert_dim_2d(X)
+        return X.reshape(1, *X.shape)
 
 def _add_n_samples_axis(X):
     '''
     when the array represents a single sample dists of shape (n_dists, n_dims),
     returns a 3 axis representation (n_dists, 1[n_samples], n_dims)
     '''
-    _assert_dim_2d(X)
-    return X.reshape(X.shape[0], 1, X.shape[1])
+    try:
+        _assert_dim_3d(X)
+        return X
+    except:
+        _assert_dim_2d(X)
+        return X.reshape(X.shape[0], 1, X.shape[1])
 
 def _add_n_dims_axis(X):
     '''
     when the array represents a single dim of shape (n_dists ,n_samples,),
     returns a 3 axis representation (n_dists, n_samples, 1[n_dims])
     '''
-    _assert_dim_2d(X)
-    return X.reshape(*X.shape,1)
+    try:
+        _assert_dim_3d(X)
+        return X
+    except:
+        _assert_dim_2d(X)
+        return X.reshape(*X.shape, 1)
 
-
-# some alises of above functions may be lsited below
+# some alaises of above functions may be lsited below
 def _fix_one_sample_2d(X):
     '''
     returns a 3d array of shape (n_samples, 1, n_dims)

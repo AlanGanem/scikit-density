@@ -16,7 +16,6 @@ index = {"JointEstimator": "01_ensemble.ipynb",
          "SimilarityTreeEnsemble": "01_ensemble.ipynb",
          "SimilarityTreeEnsembleEntropy": "01_ensemble.ipynb",
          "BaggingDensityEstimator": "01_ensemble.ipynb",
-         "AdaBoostDensityEntropyEstimator": "01_ensemble.ipynb",
          "AdaBoostDensityEstiamtor": "01_ensemble.ipynb",
          "identity_func": "02_core.random_variable.ipynb",
          "agg_smallest_distance": "04_metrics.ipynb",
@@ -65,8 +64,8 @@ modules = ["ensemble.py",
            "utils.py",
            "metrics.py"]
 
-doc_url = "https://alanmottaganem.github.io/scikit_density/"
+doc_url = "https://alanmottaganem.github.io/skdensity/"
 
-git_url = "https://github.com/alanmottaganem/scikit_density/tree/master/"
+git_url = "https://github.com/alanmottaganem/skdensity/tree/master/"
 
 def custom_doc_links(name): return None

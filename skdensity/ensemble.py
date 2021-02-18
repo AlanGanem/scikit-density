@@ -4,7 +4,7 @@ __all__ = ['JointEstimator', 'JointEntropyEstimator', 'JointSimilarityTreeEstima
            'expected_likelihood', 'inverese_log_node_var', 'datapoint_pdf', 'datapoint_gaussian_likelihood',
            'AVALIBLE_NODE_AGG_FUNC', 'AVALIBLE_DATAPOINT_WEIGHT_FUNC', 'EnsembleTreesDensityMixin',
            'SimilarityTreeEnsemble', 'SimilarityTreeEnsembleEntropy', 'BaggingDensityEstimator',
-           'AdaBoostDensityEntropyEstimator', 'AdaBoostDensityEstiamtor']
+           'AdaBoostDensityEstiamtor']
 
 # Cell
 from warnings import warn
@@ -77,7 +77,7 @@ class JointSimilarityTreeEstimator(MultiOutputRegressor):
         return sampled_idxs
 
     def sample(self, X, sample_size = 100, weights = None, n_neighbors = 10,
-                           lower_bound = 0.0, alpha = 1, beta = 0, gamma = 0, noise_factor = 0):
+                           lower_bound = 0.0, alpha = 1, beta = 0, gamma = 0, noise_factor = 1e-3):
 
         idxs = self._similarity_sample_idx(
             X, sample_size, weights, n_neighbors,lower_bound, alpha, beta, gamma)
@@ -206,7 +206,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
             #samples.append(np.concatenate(s))
         return np.array(samples)
 
-    def sample(self, X, sample_size = 100, weight_func = None, alpha = None, replace = True, noise_factor = 0):
+    def sample(self, X, sample_size = 100, weight_func = None, alpha = None, replace = True, noise_factor = 1e-3):
         '''
         weight func is a function that takes weight array (n_dists, n_bins) and returned
         an array of the same shape but with desired processing of the weights. if weight_func is not None,
@@ -250,7 +250,9 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         #samples = np.array([self._q_transformer_inverse_transform(s) for s in samples])
         samples = self._rv_bin_sample(bins_probas, sample_size)
         samples = _add_n_dims_axis(samples) # make a 3d sample array with dim axis = 1
-        return add_noise(samples, noise_factor)
+        noise = agg_smallest_distance(samples, agg_func = np.std)
+        noise = _add_n_dims_axis(noise)
+        return add_noise(samples, noise_factor*noise)
 
     def score(self, X, y = None, **score_kws):
         return self.estimator.score(X, self._q_transformer_transform(y), **score_kws)
@@ -354,54 +356,35 @@ class EnsembleTreesDensityMixin():
 
 
     def _kde_similarity_sample(self, X, sample_size = 100, weights = None, n_neighbors = 10,
-                           lower_bound = 0.0, alpha = 1, beta = 0, gamma = 0, noise_factor = 1e-6, **kde_kwargs):
+                           lower_bound = 0.0, alpha = 1, beta = 0, gamma = 0, noise_factor = 1e-3, **kde_kwargs):
 
         idx, sim = self._query_idx_and_sim(X ,n_neighbors=n_neighbors, lower_bound=lower_bound,beta = beta, gamma = gamma)
         idx, sim = np.array(idx), np.array(sim)
 
         p = self._handle_sample_weights(weight_func = weights, sim = sim, alpha = alpha)
         samples = []
-        if noise_factor == 'auto':
-            for i in range(len(idx)):
-                ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
-                noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
-                ys = add_noise(ys, noise)
-                samples.append(KDE(**kde_kwargs).fit(ys, sample_weight = None).sample(sample_size = sample_size))
-        else:
-            for i in range(len(idx)):
-                ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
-                ys = add_noise(ys, noise_factor)
-                ys = KDE(**kde_kwargs).fit(ys, sample_weight = None).sample(sample_size = sample_size)
-                samples.append(ys)
-
         for i in range(len(idx)):
             ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
             noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
-            ys = add_noise(ys, noise)
-
-
+            ys = add_noise(ys, noise_factor*noise)
+            samples.append(KDE(**kde_kwargs).fit(ys, sample_weight = None).sample(sample_size = sample_size))
             #try
 
         return np.array(samples)
 
     def _similarity_sample(self, X, sample_size = 100, weights = None, n_neighbors = 10,
-                           lower_bound = 0.0, alpha = 1, beta = 0, gamma = 0, noise_factor = 'auto'):
+                           lower_bound = 0.0, alpha = 1, beta = 0, gamma = 0, noise_factor = 1e-3):
 
         idx, sim = self._query_idx_and_sim(X ,n_neighbors=n_neighbors, lower_bound=lower_bound,beta = beta, gamma = gamma)
         idx, sim = np.array(idx), np.array(sim)
 
         p = self._handle_sample_weights(weight_func = weights, sim = sim, alpha = alpha)
         samples = []
-        if noise_factor == 'auto':
-            for i in range(len(idx)):
-                ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
-                noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
-                ys = add_noise(ys, noise)
-                samples.append(ys)
-        else:
-            for i in range(len(idx)):
-                ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
-                samples.append(add_noise(ys, noise_factor))
+        for i in range(len(idx)):
+            ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
+            noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
+            ys = add_noise(ys, noise_factor*noise)
+            samples.append(ys)
 
         return np.array(samples)
 
@@ -564,7 +547,7 @@ class SimilarityTreeEnsemble(BaseEstimator, DelegateEstimatorMixIn ,EnsembleTree
         return self
 
     def kde_sample(self, X, sample_size = 10, weights = None, n_neighbors = None,
-               lower_bound = None, alpha = None, beta = None, gamma = None, noise_factor = 1e-6, **kde_kwargs):
+               lower_bound = None, alpha = None, beta = None, gamma = None, noise_factor = 1e-3, **kde_kwargs):
 
         n_neighbors, lower_bound, alpha, beta, gamma = self._handle_similarity_sample_parameters(
             n_neighbors, lower_bound,alpha, beta, gamma)
@@ -576,7 +559,7 @@ class SimilarityTreeEnsemble(BaseEstimator, DelegateEstimatorMixIn ,EnsembleTree
         return samples
 
     def sample(self, X, sample_size = 10, weights = None, n_neighbors = None,
-               lower_bound = None, alpha = None, beta = None, gamma = None, noise_factor = 1e-6):
+               lower_bound = None, alpha = None, beta = None, gamma = None, noise_factor = 1e-3):
         '''wieghts should be callable (recieves array returns array of same shape) or None'''
         n_neighbors, lower_bound, alpha, beta, gamma = self._handle_similarity_sample_parameters(
             n_neighbors, lower_bound,alpha, beta, gamma)
@@ -675,9 +658,6 @@ class BaggingDensityEstimator(ensemble.BaggingRegressor):
 
 
 # Cell
-class AdaBoostDensityEntropyEstimator:
-    pass
-
 class AdaBoostDensityEstiamtor(ensemble.AdaBoostRegressor):
 
     def sample(self, X, sample_size = 10, weights = 'boosting_weights'):
