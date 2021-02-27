@@ -17,7 +17,10 @@ from sklearn.decomposition import PCA, KernelPCA
 import KDEpy as kdepy
 import awkde
 
-from ..utils import cos_sim_query, sample_multi_dim, ctqdm, DelegateEstimatorMixIn, _vector_1d_to_matrix,_assert_dim_3d
+from ..utils import (
+    cos_sim_query, sample_multi_dim, ctqdm, DelegateEstimatorMixIn, _vector_1d_to_matrix,_assert_dim_3d,_assert_dim_2d,
+    add_noise
+)
 
 # Cell
 
@@ -50,7 +53,7 @@ class KDE():
 
     AVALIBLE_BW_METHODS = ['ISJ', 'scott', 'silverman', 'mean_distance', 'std_distance', 'median_distance']
 
-    def __init__(self, bw = 'std_distance', space_transformer = PCA, implementation = 'sklearn', kde_kws = {}, st_kws = {}):
+    def __init__(self, bw = 'std_distance', space_transformer = PCA, implementation = 'sklearn', st_kws = {}, **kde_kws):
 
         if bw.__class__ == str:
             assert bw in self.AVALIBLE_BW_METHODS, f"if str, bw should be one of {self.AVALIBLE_BW_METHODS}, not {bw}"
@@ -85,8 +88,19 @@ class KDE():
         elif bw_method == 'std_distance':
             return np.array([agg_smallest_distance(X[:,i].reshape(1,X.shape[0],1), np.std) for i in range(X.shape[-1])])
 
-    def fit(self, X, y = None, sample_weight = None):
+    def _preprocess_fit(self, X):
+        '''
+        preprocess data prior to fit. ensure len >2 and add some white noise to avoid eigenvalues errors in space transform
+        '''
         X = self._check_X_2d(X)
+        if len(X) < 2:
+            X = np.concatenate([X,X])
+        X = add_noise(X, 1e-9)
+        return X
+
+    def fit(self, X, y = None, sample_weight = None):
+        #preprocess X
+        X = self._preprocess_fit(X)
         #fit and transform X with manifold learner (self.space_transformer)
         if isinstance(self._space_transformer, type):
             self._space_transformer = self._space_transformer(**{**self.st_kws, **{
@@ -101,6 +115,8 @@ class KDE():
             warn('passing a float value for bw is not recomended since X will be transformed by space_transformer before fitting and bw value may not make sence in new trnasformed space')
             bw = self.bw
 
+        #ensure bw is positive
+        bw = max(1e-4, bw)
         #kde
         if self.implementation == 'sklearn':
             self.estimator = KernelDensity(**{**{'bandwidth':bw},**self.kde_kws}).fit(X, y, sample_weight = sample_weight)
@@ -137,7 +153,8 @@ class KDE():
     def pdf(self, data):
         return self.evaluate(data)
 
-    def rvs(self, sample_size = 1, random_state = None):
+    def rvs(self, size = 1, random_state = None):
+        sample_size = size
         if self.implementation == 'sklearn':
             samples = self.estimator.sample(n_samples = sample_size, random_state = random_state)
         elif self.implementation == 'scipy':
@@ -153,7 +170,7 @@ class KDE():
         return self.rvs(sample_size, random_state)
 
     def entropy(self, sample_size = 100):
-        return np.mean(-np.log2(self.evaluate(self.rvs(sample_size = sample_size))))
+        return np.mean(-np.log2(self.evaluate(self.rvs(size = sample_size))))
 
     def cdf(self, data, sample_size = 100):
         #estimate using sampling and QuantileTransformer since integration is too costly
@@ -163,7 +180,7 @@ class KDE():
     def ppf(self, data, sample_size = 100):
         #estimate using sampling and QuantileTransformer since integration is too costly
         data = np.array(data)
-        assert (data.min() >= 0) and (data.max() <= 1), 'data contains values <= 0 or >= 1'
+        assert (data.min() >= 0) and (data.max() <= 1), 'data contains values < 0 or > 1'
         samples = self.sample(sample_size = sample_size)
         return QuantileTransformer(n_quantiles = min(1000,samples.shape[0])).fit(samples).inverse_transform(data)
 
@@ -185,24 +202,29 @@ class KDE():
 
 
 # Cell
-
 class RandomVariable():
     '''
     A container for distribution objects
     '''
 
     @classmethod
-    def from_weights(cls, values, weights, n_samples = 100):
-        data = np.random.choice(values, size = n_samples, p = weights)
+    def from_weights(cls, values, weights, sample_size = 100):
+        data = np.random.choice(values, size = sample_size, p = weights)
         return cls.__init__(data,)
 
-    def __init__(self, data, verbose = False):
-        self.samples = data
-        self.n_dim = 1 if len(data.shape) == 1 else data.shape[-1]
+    def __init__(self, default_dist = 'kde', verbose = False, keep_samples = False):
         self._fitted_dists = {}
         self.log_likelihood = []
-        self.verbose = False
+        self.default_dist = default_dist
+        self.verbose = verbose
+        self.keep_samples = keep_samples
+        self._samples = None
         return
+
+    def _reset_fits(self,):
+        self._fitted_dists = {}
+        self.log_likelihood = []
+        self._samples = None
 
     def __getitem__(self, item):
         if item == 'best':
@@ -216,17 +238,37 @@ class RandomVariable():
     #def __repr__(self):
     #    return f'RandomVariable({str(self.samples)})'
 
-    def fit_best(self, candidates = ['norm','halfnorm','lognorm']):
-        #fit all and make alias for best fit
-        self._fit_all(self.samples, candidates)
-        return self
-
     def _fit_ecdf(self, data, **ecdf_kwargs):
         self.ecdf = QuantileTransformer(**ecdf_kwargs).fit(data)
         return self
 
-    def fit_dist(self, dist, **dist_kwargs):
-        return self._fit_dist(self.samples,dist, **dist_kwargs)
+    def fit_new(self, data, dist = None, **dist_kwargs):
+        '''
+        fits given distributions
+        creates alias `best` for dist with maximum likelihood
+        '''
+        if dist is None:
+            dist = self.default_dist
+
+        if dist.__class__ in [list,tuple,set]:
+            pass
+        elif dist.__class__ == str:
+            dist = [dist]
+        else:
+            raise TypeError(f'dist should be str, list, tuple or set, not {dist.__class__}')
+
+        self.n_dim = 1 if len(data.shape) == 1 else data.shape[-1]
+        if self.keep_samples:
+            self._samples = data
+
+        self._fit_all(data ,dist, **dist_kwargs)
+
+        return self
+
+    def fit(self, data, dist = None, **dist_kwargs):
+        self._reset_fits()
+        self.fit_new(data, dist, **dist_kwargs)
+        return self
 
     def _check_best(self):
         dists_aliases = list(self._fitted_dists)
@@ -235,10 +277,10 @@ class RandomVariable():
         self._best_fit_alias = dists_aliases[best_fit_idx]
         return
 
-    def _fit_all(self, data, candidates):
+    def _fit_all(self, data, dists):
         #TODO: check for multiplicity in candidates aliases
-        for candidate in ctqdm(candidates, verbose = self.verbose):
-            self.fit_dist(candidate)
+        for candidate in ctqdm(dists, verbose = self.verbose):
+            self._fit_dist(data, candidate)
         return self
 
     def _fit_dist(self, data, dist, **dist_kwargs):
@@ -253,12 +295,12 @@ class RandomVariable():
             if self.n_dim > 1:
                 raise ValueError('rv_continuous distributions is only available for 1d distributions. Use "kde" dist instead.')
             params = dist_class.fit(data)
-            log_likelihood = np.log(np.product(dist_class.pdf(data,*params)))
+            log_likelihood = np.sum(np.log(dist_class.pdf(data,*params)))
             self._fitted_dists = {**self._fitted_dists, **{alias:(dist_class(*params),log_likelihood)}}
             self.log_likelihood = list({**dict(self.log_likelihood), **{alias:log_likelihood}}.items())
         else:
             dist = dist_class(**dist_kwargs).fit(data)
-            log_likelihood = np.log(np.product(dist.pdf(data)))
+            log_likelihood = np.sum(np.log(dist.pdf(data)))
             self._fitted_dists = {**self._fitted_dists, **{alias:(dist,log_likelihood)}}
             self.log_likelihood = list({**dict(self.log_likelihood), **{alias:log_likelihood}}.items())
 
@@ -306,33 +348,55 @@ class RandomVariable():
             else:
                 return candidate_value
 
-    def sample(self, sample_size, dist = 'empirical', **kwargs):
-        if dist == 'empirical':
-            sampled_idxs = np.random.choice([*range(self.samples.shape[0])], size = sample_size, **kwargs)
-            return self.samples[sampled_idxs]
-        else:
-            return self[dist].rvs(size = size, **kwargs)
+    def sample(self, sample_size, dist = 'best', **kwargs):
+        return self.rvs(size = sample_size, dist = dist, **kwargs)
 
-    def cdf(self, data, dist = 'empirical'):
-        if dist == 'empirical':
-            return self.ecdf.transform(data)
-        else:
-            return self[dist].cdf(data)
+    def rvs(self, size, dist = 'best', **kwargs):
+        samples = self[dist].rvs(size = size, **kwargs)
 
-    def pdf(self, data, dist = 'best'):
-        if dist == 'empirical':
-            raise ValueError('empirical quantile distribution has no pdf definition')
-        else:
-            return self[dist].pdf(data)
+        if len(samples.shape) == 1:
+            samples = samples.reshape(*samples.shape,1)
 
-    def ppf(self, data, dist = 'empirical'):
-        if dist == 'empirical':
-            return self.ecdf.inverse_transform(data)
-        else:
-            return self[dist].ppf(data)
+        return samples
 
-    def entropy(self, dist):
-        return self[dist].entropy()
+    def _fix_inference_data_input(self, data):
+        if len(data.shape) == 1:
+            data = data.reshape(-1,1)
+        _assert_dim_2d(data)
+        assert data.shape[1] == self.n_dim, f'Expected data to have shape (n_samples, n_dims({self.n_dim})). got (n_samples, n_dims({data.shape[1]})).'
+        return data
+
+    def _fix_inference_output(self, data):
+        if len(data.shape) == 1:
+            return data.reshape(-1,1)
+        else:
+            return data
+
+    def cdf(self, data, dist = 'best', **cdf_kws):
+        data = self._fix_inference_data_input(data)
+        samples = self[dist].cdf(data, **cdf_kws)
+        return self._fix_inference_output(samples)
+
+    def pdf(self, data, dist = 'best', **pdf_kws):
+        data = self._fix_inference_data_input(data)
+        samples =  self[dist].pdf(data, **pdf_kws)
+        return self._fix_inference_output(samples)
+
+    def evaluate(self, data, dist = 'best', **evaluate_kws):
+        '''alias for self.pdf'''
+        return self.pdf(data, dist = 'best', **evaluate_kws)
+
+    def predict(self, data, dist = 'best', **predict_kws):
+        '''alias for self.pdf'''
+        return self.pdf(data, dist = 'best', **predict_kws)
+
+    def ppf(self, data, dist = 'best', **ppf_kws):
+        data = self._fix_inference_data_input(data)
+        samples = self[dist].ppf(data)
+        return self._fix_inference_output(samples)
+
+    def entropy(self, dist = 'best', **entropy_kws):
+        return self[dist].entropy(**entropy_kws)
 
 
 # Cell
@@ -340,20 +404,94 @@ class RVArray:
     '''
     An array that contains RandomVariable objects and facilitates method calls and getting attributes
     '''
+    @property
+    def data(self,):
+        return self._data
+
     def __init__(self, data):
         ''' the constructor recieves a list of RandomVariable items'''
-        self.data = np.array(data)
+        self._data = np.array(data)
 
     def __getattr__(self, attr):
-        attr_list = [getattr(i,attr) for i in self.data]
-        return RVArray(attr_list)
-
-    def __call__(self, *args, **kwargs):
-        results = [i(*args,**kwargs) for i in self.data]
-        if all([isinstance(i,np.ndarray) for i in results]):
-            return np.array(results)
+        attr_list = []
+        for i in self.data:
+            attr_list.append(getattr(i,attr))
+        if all([callable(i) for i in attr_list]):
+            return RVArray(attr_list)
         else:
-            return RVArray(results)
+            return np.array(attr_list)
+
+
+    def __call__(self, *args, method = 'simple', **kwargs):
+        '''
+        method can be called in two ways:
+        simple: the same args and kwargs are applied to all the objects inside RVArray
+        broadcast: for each (row) object in RVArray, the correspondent (same row) arg and kwarg is applied
+        '''
+        assert method in ['simple','broadcast']
+
+        if method == 'simple':
+            results = []
+            for i in self.data:
+                results.append(i(*args,**kwargs))
+
+            if all([isinstance(i,np.ndarray) for i in results]):
+                return np.array(results)
+            else:
+                return RVArray(results)
+
+        elif method == 'broadcast':
+
+            if args:
+                args_lens_check = [len(arg) == len(self.data) for arg in args]
+                assert all(args_lens_check)
+            if kwargs:
+                kwargs_lens_check = [len(arg) == len(self.data) for arg in kwargs.items()]
+                assert all(kwargs_lens_check)
+
+            #prepare args
+            if args:
+                _args = []
+                for arg in args:
+                    _args.append([val for val in arg])
+                args = _args
+            #prepare kwargs
+            _kwargs = []
+            if kwargs:
+                _len = len(kwargs[list(kwargs)[0]])
+                for i in range(_len):
+                    kwargs_i = {}
+                    for key in kwargs:
+                        kwargs_i[key] = kwargs[key][i]
+                    _kwargs.append(kwargs_i)
+                kwargs = _kwargs
+
+            #run
+            if kwargs and args:
+                results = []
+                for i in range(len(self.data)):
+                    results.append(self.data[i](*args[i],**kwargs[i]))
+
+            elif kwargs and not args:
+                results = []
+                for i in range(len(self.data)):
+                    results.append(self.data[i](*args,**kwargs[i]))
+
+            elif not kwargs and args:
+                results = []
+                for i in range(len(self.data)):
+                    results.append(self.data[i](*[arg[i] for arg in args],**kwargs))
+            else:
+                results = []
+                for i in range(len(self.data)):
+                    results.append(self.data[i](*args,**kwargs))
+
+            #return values
+            if all([isinstance(i,np.ndarray) for i in results]):
+                return np.array(results)
+            else:
+                return RVArray(results)
+
 
     def __getitem__(self, *args):
 
