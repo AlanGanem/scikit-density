@@ -10,10 +10,14 @@ import copy
 from tqdm.notebook import tqdm
 #linalg
 import numpy as np
+from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import normalize
 from sklearn.neighbors import NearestNeighbors
 from sklearn.utils.fixes import _joblib_parallel_args
 from joblib import Parallel, delayed
+from multiprocessing import Pool
+
+from dask.diagnostics import ProgressBar
 
 import scipy
 
@@ -190,10 +194,11 @@ def sample_idxs(weights, sample_size, replace = True):
     '''
     #make sure weights sum up to 1
     weights = normalize(weights, norm = 'l1', axis = 1)
-    sampled_idxs = [np.random.choice([*range(w.shape[0])], size = sample_size, p = w, replace = replace) for w in weights]
+    sampled_idxs = [np.random.choice(np.arange(w.shape[0]), size = sample_size, p = w, replace = replace) for w in weights]
     return np.array(sampled_idxs)
 
 def draw_from(arr, frac = 1.0, axis = 0, weights = None, replace = False,):
+
     '''
     draw samples without (default) replacement given a fraction of dataset
     '''
@@ -213,7 +218,7 @@ def sample_multi_dim(arr, sample_size, weights, replace = True, axis = 0):
     '''
     if not weights is None:
         assert _assert_dim_1d(weights).shape[0] == arr.shape[axis], f'cannot allign weights and arr along axis {axis}'
-    sampled_idxs = np.random.choice([*range(arr.shape[axis])], size = sample_size, p = weights, replace = replace)
+    sampled_idxs = np.random.choice(np.arange(arr.shape[axis]), size = sample_size, p = weights, replace = replace)
     return np.take(arr, sampled_idxs, axis=axis)
 
 def sample_from_dist_array(arr, sample_size, weights = None, replace = True):
@@ -244,7 +249,6 @@ def add_multivariate_noise(x, std):
     adds small multivariate normal noise to array
     '''
     noise = np.random.multivariate_normal(mean = [0]*x.shape[-1], cov = std, size = x.shape[0])
-    print(noise.shape)
     return x + noise
 
 # Cell
@@ -319,7 +323,7 @@ def make_batches(arr, batch_size = 100):
             batches.append(arr[(i + 1) * batch_size:])
     return batches
 
-def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, beta = 1, gamma = 1, multicore = False):
+def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, beta = 1, gamma = 1, n_jobs = None):
     '''make cos similarity query of query_vector on query_space
     beta is a weightening factor such that query_space = normalize(query_space^beta)
     beta greater than one ensure higher magnitude components recieves more importance when querying
@@ -329,38 +333,37 @@ def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, be
     query_vector, query_space = copy.deepcopy(query_vector), copy.deepcopy(query_space)
     query_vector, query_space = transform_similarity_weights(query_vector, query_space, beta, gamma)
 
-    #print(f'n_dims = {query_space.shape[1]}, query_space_size = {query_space.shape[0]}, query_vector_size = {query_vector.shape[0]}')
-    #print(f'Querying {n_neighbors} nearest neighbors, this can take a while...')
-
-    query_space = query_space.T
+    print(f'Querying {n_neighbors} nearest neighbors, this can take a while...')
     if not scipy.sparse.issparse(query_vector):
         query_vector = scipy.sparse.csr_matrix(query_vector)
 
     if not scipy.sparse.issparse(query_space):
         query_space = scipy.sparse.csr_matrix(query_space)
     try:
-        if not multicore:
-            sim_matrix = (
-                awesome_cossim_topn(query_vector, query_space,ntop=n_neighbors, lower_bound=lower_bound)
-            )
+        query_space = query_space.T
+        if n_jobs is None:
+            sim_matrix = awesome_cossim_topn(query_vector, query_space,ntop=n_neighbors, lower_bound=lower_bound,)
+
         else:
-            batches = make_batches(query_vector)
-            print
-            sim_matrix = Parallel(n_jobs=-1, verbose=0,
+            batches = make_batches(query_vector, batch_size = np.ceil(query_vector.shape[0]/4).astype(int))
+
+            sim_matrix = Parallel(n_jobs=n_jobs, verbose=1,
                                    **_joblib_parallel_args(prefer="threads"))(
                     delayed(awesome_cossim_topn)(qv, query_space,
                                              ntop=n_neighbors, lower_bound=lower_bound)
-                    for qv in tqdm(batches))
+                    for qv in batches)
+
             sim_matrix = scipy.sparse.vstack(sim_matrix)
 
-        sim_matrix = scipy.sparse.coo_matrix(sim_matrix)
+        sim_matrix = scipy.sparse.csr_matrix(sim_matrix)
 
         idx = []
         sim = []
         arr_sizes = []
-        for row in range(sim_matrix.shape[0]):
-            s = sim_matrix.data[sim_matrix.row == row]
-            i = sim_matrix.col[sim_matrix.row == row]
+        #VERY SLOW!!!!!
+        for d in sim_matrix:
+            s = d.data
+            i = d.nonzero()[1]
             sim.append(s)
             idx.append(i)
             arr_sizes.append(len(s))

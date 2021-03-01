@@ -21,6 +21,8 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.utils.fixes import _joblib_parallel_args
 from sklearn.metrics import pairwise
+from sklearn.decomposition import TruncatedSVD
+from sklearn.pipeline import Pipeline
 from numpy.linalg import LinAlgError
 from scipy.spatial.distance import cdist
 
@@ -187,7 +189,6 @@ IDENTITY_TRANSFORMER = FunctionTransformer(
 )
 
 
-##IMPLEMENT CALIBRATED CDF AND PPF ON RANDOM VARIABLE
 class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
     '''
     Meanwhile only performs marginal density estiamtion, not joint. Thus, only 1dimensional y.
@@ -349,7 +350,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         samples_dist = samples_dist[:,:,0]
         idxs = sample_idxs(bin_probas, sample_size = sample_size)
         samples = []
-        for i in tqdm([*range(bin_probas.shape[0])]):
+        for i in tqdm(np.arange(bin_probas.shape[0])):
             idx = idxs[i]
             idx, counts = np.unique(idx, return_counts = True)
             s = [np.random.choice(samples_dist[i],c, replace = True) for i,c in zip(idx,counts)]
@@ -412,7 +413,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         returns a RVArray instance of RandomVariable objects fitted on sampled data based on X and other sample params
         '''
         samples = self.sample(X, sample_size, weight_func, alpha, replace, noise_factor)
-        rv_objects = [RandomVariable(keep_samples = True).fit(sample, dist, **dist_kws) for sample in tqdm(samples)]
+        rv_objects = [RandomVariable(keep_samples = False).fit(sample, dist, **dist_kws) for sample in tqdm(samples)]
         return RVArray(rv_objects)
 
 
@@ -471,6 +472,17 @@ class TreeEstimatorMixin():
     def _node_data_generator(self):
         return self._make_node_data_generator(self.y_, self._raw_leaf_node_matrix)
 
+    def _make_node_data_generator(self, y, node_matrix):
+        '''
+        creates a generator from sparse matrix where each iter retrns a row
+        '''
+        s1 = node_matrix.sum(axis = 0).cumsum().A.astype(int).flatten()
+        s2 = np.concatenate([[0],s1[:-1]])
+        slices = [slice(i[0],i[1]) for i in zip(s2,s1)]
+        idxs = node_matrix.tocsc().indices
+        idxs = [idxs[s] for s in slices]
+        return (y[idx] for idx in tqdm(idxs))
+
     def _make_node_kde_array(self): #<- since kde esitmation is the best approach, save kde fitted instances for each node
         #to make use of it during node and node_data wieght inference
         #maybe its better to get data from multiple nodes before fitting kde
@@ -493,8 +505,11 @@ class TreeEstimatorMixin():
 
     def _fit_leaf_node_matrix(self, X, y, node_rank_func, node_data_rank_func):
         nodes_array = self._apply(X)
-        self._leaf_node_one_hot_encoder = OneHotEncoder()
-        leaf_node_matrix = self._leaf_node_one_hot_encoder.fit_transform(nodes_array)
+
+
+        self._leaf_node_trnasformer = OneHotEncoder()
+
+        leaf_node_matrix = self._leaf_node_trnasformer.fit_transform(nodes_array)
 
         self._raw_leaf_node_matrix = leaf_node_matrix
         #self._node_data_generator = self.#self._make_node_data_generator(y, leaf_node_matrix)
@@ -506,7 +521,7 @@ class TreeEstimatorMixin():
 
         return  self._make_weighted_query_vector(
             agg_node_weights = self._leaf_node_weights,
-            node_matrix = self._leaf_node_one_hot_encoder.transform(self._apply(X)))
+            node_matrix = self._leaf_node_trnasformer.transform(self._apply(X)))
 
 
     def _query_idx_and_sim(self, X, n_neighbors, lower_bound, beta, gamma):
@@ -522,7 +537,7 @@ class TreeEstimatorMixin():
         Works only for marginal distributions
         '''
         nodes_array = self._apply(X)
-        forest_embeddings = self._leaf_node_one_hot_encoder.transform(nodes_array)
+        forest_embeddings = self._leaf_node_trnasformer.transform(nodes_array)
         samples = self.entropy_estimator_sampler.sample(forest_embeddings, sample_size, weight_func, alpha, noise_factor)
         return samples
 
@@ -532,8 +547,8 @@ class TreeEstimatorMixin():
         Works only for marginal distributions
         '''
         nodes_array = self._apply(X)
-        self._leaf_node_one_hot_encoder = OneHotEncoder()
-        forest_embeddings = self._leaf_node_one_hot_encoder.fit_transform(nodes_array)
+        self._leaf_node_trnasformer = OneHotEncoder()
+        forest_embeddings = self._leaf_node_trnasformer.fit_transform(nodes_array)
         self.entropy_estimator_sampler.fit(forest_embeddings, y, **fit_kws)
         return self
 
@@ -545,7 +560,7 @@ class TreeEstimatorMixin():
 
         p = self._handle_sample_weights(weight_func = weight_func, sim = sim, alpha = alpha)
         samples = []
-        for i in tqdm([*range(len(idx))]):
+        for i in tqdm(np.arange(len(idx))):
             ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
             noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
             ys = add_noise(ys, noise_factor*noise)
@@ -563,7 +578,7 @@ class TreeEstimatorMixin():
 
         p = self._handle_sample_weights(weight_func = weights, sim = sim, alpha = alpha)
         samples = []
-        for i in tqdm([*range(len(idx))]):
+        for i in tqdm(np.arange(len(idx))):
             ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
             noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
             ys = add_noise(ys, noise_factor*noise)
@@ -579,7 +594,7 @@ class TreeEstimatorMixin():
         samples = self._similarity_sample(X, sample_size, weights, n_neighbors,
                            lower_bound, alpha, beta, gamma, noise_factor)
 
-        rv_objects = [RandomVariable(keep_samples = True).fit(sample, dist, **dist_kws) for sample in tqdm(samples)]
+        rv_objects = [RandomVariable(keep_samples = False).fit(sample, dist, **dist_kws) for sample in tqdm(samples)]
         return RVArray(rv_objects)
 
     def _similarity_sample_idx(self, X, sample_size, weight_func, n_neighbors,
@@ -651,14 +666,6 @@ class TreeEstimatorMixin():
         datapoint_node_weights = [node_data_rank_func(node_data) for node_data in self._node_data_generator]
         return datapoint_node_weights
 
-    def _make_node_data_generator(self, y, node_matrix):
-        s1 = node_matrix.sum(axis = 0).cumsum().A.astype(int).flatten()
-        s2 = np.concatenate([[0],s1[:-1]])
-        slices = [slice(i[0],i[1]) for i in zip(s2,s1)]
-        idxs = node_matrix.tocsc().indices
-        idxs = [idxs[s] for s in slices]
-        return (y[idx] for idx in tqdm(idxs))
-
     def _handle_sample_weights(self, weight_func, sim, alpha):
         '''
         sampling wights should sum to 1, since its a sampling probability
@@ -673,7 +680,9 @@ class TreeEstimatorMixin():
         multiplies elements of query vector by their respective weights
         the greater the weights, the better the "quality" of the nodes
         '''
-        assert isinstance(node_matrix, scipy.sparse.csr_matrix), 'input should be instance of scipy.sparse.csr_matrix'
+        if not isinstance(node_matrix, scipy.sparse.csr_matrix):
+            node_matrix = scipy.sparse.csr_matrix(node_matrix)
+
         node_matrix.data = node_matrix.data*np.take(agg_node_weights, node_matrix.indices)
         return node_matrix
 
@@ -682,7 +691,8 @@ class TreeEstimatorMixin():
         query space is the leaf_node_matrix multiplied by node_data_weights
         the greater the value in the matrix, the better the "quality" of that data point
         '''
-        assert isinstance(node_matrix, scipy.sparse.csr_matrix), 'input should be instance of scipy.sparse.csr_matrix'
+        if not isinstance(node_matrix, scipy.sparse.csr_matrix):
+            node_matrix = scipy.sparse.csr_matrix(node_matrix)
 
         if not node_data_rank_func is None:
             # datapoint_node_weights multiplication (columns)
@@ -907,7 +917,7 @@ class BaggingDensityEstimator(ensemble.BaggingRegressor):
 
     def _sample_idxs(self, X, sample_size, weights):
         '''Sample indxs according to estimator weights'''
-        return [np.random.choice([*range(self.n_estimators)], size = sample_size, p = weights) for i in range(X.shape[0])]
+        return [np.random.choice(np.arange(self.n_estimators), size = sample_size, p = weights) for i in range(X.shape[0])]
 
 # Cell
 class AdaBoostDensityEstiamtor(ensemble.AdaBoostRegressor):
@@ -937,5 +947,5 @@ class AdaBoostDensityEstiamtor(ensemble.AdaBoostRegressor):
             weights = self.estimator_weights_[:len(self.estimators_)]*weights
             weights /= weights.sum()
 
-        idxs = [np.random.choice([*range(len(self.estimators_))], size = sample_size, p = weights) for i in range(X.shape[0])]
+        idxs = [np.random.choice(np.arange(len(self.estimators_)), size = sample_size, p = weights) for i in range(X.shape[0])]
         return idxs

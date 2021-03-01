@@ -202,15 +202,13 @@ class KDE():
 
 
 # Cell
+
+
+#CREATE EMPIRICAL DIST METHODS (WITH ADD NOISE IN SAMPLING OPTION AND ALL) <-----
 class RandomVariable():
     '''
     A container for distribution objects
     '''
-
-    @classmethod
-    def from_weights(cls, values, weights, sample_size = 100):
-        data = np.random.choice(values, size = sample_size, p = weights)
-        return cls.__init__(data,)
 
     def __init__(self, default_dist = 'kde', verbose = False, keep_samples = False):
         self._fitted_dists = {}
@@ -291,9 +289,17 @@ class RandomVariable():
         alias, dist_class = self._get_dist_from_name(alias, dist_name)
         if alias.lower() == 'best':
             raise ValueError('"best" cannot be an alias for a distribution. its internally assgined to the best fit dist')
-        if alias != 'kde':
-            if self.n_dim > 1:
-                raise ValueError('rv_continuous distributions is only available for 1d distributions. Use "kde" dist instead.')
+
+        if alias == 'rv_histogram':
+            hist = np.histogram(data, bins = 'auto')#len(np.unique(data)))
+            dist = dist_class(hist)
+            log_likelihood = np.sum(np.log(dist.pdf(data)))
+            self._fitted_dists = {**self._fitted_dists, **{alias:(dist,log_likelihood)}}
+            self.log_likelihood = list({**dict(self.log_likelihood), **{alias:log_likelihood}}.items())
+
+        elif alias != 'kde':
+            #if self.n_dim > 1:
+            #    raise ValueError('rv_continuous distributions is only available for 1d distributions. Use "kde" dist instead.')
             params = dist_class.fit(data)
             log_likelihood = np.sum(np.log(dist_class.pdf(data,*params)))
             self._fitted_dists = {**self._fitted_dists, **{alias:(dist_class(*params),log_likelihood)}}
@@ -315,19 +321,21 @@ class RandomVariable():
         that is also instance of scipy.stats.rv_continuous
         '''
         if isinstance(dist_name,str):
-            if isinstance(getattr(stats,dist_name), stats.rv_continuous):
-                alias = dist_name
-                return (alias, getattr(stats,dist_name))
-            elif dist_name.lower() == 'kde':
+            if dist_name.lower() == 'kde':
                 alias = 'kde'
                 return (alias, KDE)
+
+            elif dist_name in dir(stats):
+                alias = dist_name
+                return (alias, getattr(stats,dist_name))
+
             else:
-                raise ValueError(f'dist must be a valid scipy.stats.rv_continuous instance, not {getattr(stats,dist_name)}')
+                raise ValueError(f'dist must be a valid scipy.stats.rv_continuous subclass, not {getattr(stats,dist_name)}')
 
         elif isinstance(dist_name, stats.rv_continuous):
             return (alias, dist_name)
         else:
-            raise ValueError(f'dist must be a valid scipy.stats.rv_continuous instance or str, not {dist_name}')
+            raise ValueError(f'dist must be a valid scipy.stats.rv_continuous subclass or str, not {dist_name}')
 
     def _handle_dist_names(self, candidate_value):
         '''
