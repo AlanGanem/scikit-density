@@ -14,7 +14,7 @@ from tqdm.notebook import tqdm
 import numpy as np
 import pandas as pd
 from sklearn import ensemble
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import OneHotEncoder, normalize, QuantileTransformer, FunctionTransformer, MinMaxScaler
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.multioutput import MultiOutputRegressor, MultiOutputClassifier
@@ -22,6 +22,7 @@ from sklearn.utils.fixes import _joblib_parallel_args
 from sklearn.metrics import pairwise
 from sklearn.decomposition import TruncatedSVD
 from sklearn.pipeline import Pipeline
+from sklearn.utils.class_weight import compute_sample_weight
 from numpy.linalg import LinAlgError
 from scipy.spatial.distance import cdist
 
@@ -77,14 +78,14 @@ class QuantileCalibrator(BaseEstimator):
         weights = normalize(np.array(weights), norm = 'l1')
         return weights
 
-    def sample(self, X, sample_size = 100, weight_func = None,
+    def sample(self, X, sample_size = 1000, weight_func = None,
                alpha = None, replace = True, noise_factor = 0, **sampling_kws):
         '''
         resamples values in each dist taking into account quantile calibration factor learned from
         training set
         '''
 
-        X = self.estimator.sample(X, sample_size = 100, weight_func = None,
+        X = self.estimator.sample(X, sample_size = 1000, weight_func = None,
                alpha = None, replace = True, noise_factor = 0, **sampling_kws)
 
         p = self._make_resampling_weights(X)
@@ -109,16 +110,16 @@ IDENTITY_TRANSFORMER = FunctionTransformer(
 )
 
 
-class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
+class EntropyEstimator(BaseEstimator, ClassifierMixin, DelegateEstimatorMixIn):
     '''
     Meanwhile only performs marginal density estiamtion, not joint. Thus, only 1dimensional y.
     For joint, should try something using RegressionChain (to pass dimension information to the prediction of other dims)
     '''
-    def __init__(self,estimator, resolution = 100, alpha = 1, calibrated_classifier = None, calibration_cv = 4,rv_bins_kws = {}):
+    def __init__(self,estimator, resolution = 'auto', alpha = 1, calibrated_classifier = None, calibration_cv = 4,rv_bins_kws = {}):
         '''
         resolution can be int (number of bins of uniform quantile transformation) or hist array
         '''
-        assert hasattr(estimator, 'predict_proba'), 'estimator should implement `predict_proba` method'
+        assert hasattr(estimator, 'predict_proba') or ('predict_proba' in dir(estimator)), 'estimator should implement `predict_proba` method'
         self.estimator = estimator
 
         self.alpha = alpha
@@ -132,7 +133,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         elif calibrated_classifier is None:
             self.calibrated_classifier = None
         else:
-            assert hasattr(calibrated_classifier, 'predict_proba'), f'calibrated_classifier should implement `predict_proba method`'
+            assert hasattr(calibrated_classifier, 'predict_proba') or ('predict_proba' in dir(calibrated_classifier)), f'calibrated_classifier should implement `predict_proba method`'
             assert not isinstance(calibrated_classifier, type), f'calibrated_classifier should be an instance, not type'
             self.calibrated_classifier = calibrated_classifier
 
@@ -145,7 +146,11 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         y = _fix_X_1d(y)
         if type(self.resolution) == str:
             self.bin_edges = np.histogram_bin_edges(y, bins = self.resolution)
+            print(f'base classifier will be trained with {len(self.bin_edges)} classes')
             return self.bin_edges
+
+        elif type(self.resolution) == np.ndarray:
+            self.bin_edges = self.resolution
 
         elif type(self.resolution) == int:
             self.q_transformer = QuantileTransformer(n_quantiles = self.resolution)
@@ -155,10 +160,10 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
             self._q_minmax_scaler.fit(y)
             return self.q_transformer
 
-        elif isinstance(self.resolution,np.ndarray):
+        elif isinstance(self.resolution, list):
             return self.resolution
 
-        else: raise TypeError(f'self.resolution should be Array of bin edges, str or int, got {self.resolution.__class__}')
+        else: raise TypeError(f'self.resolution should be np.array of bin edges, str or int, got {self.resolution.__class__}')
 
 
 
@@ -168,7 +173,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         '''
         y = _fix_X_1d(y)
 
-        if type(self.resolution) == str:
+        if type(self.resolution) in (str, np.ndarray):
             y_transformed = np.digitize(y, self.bin_edges)
 
         elif type(self.resolution) == int:
@@ -240,6 +245,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         # fit kdes
         bin_ids = list(set(y_transformed))
         bins_data_mapper = [y[y_transformed == i] for i in bin_ids]
+        print('fitting RandomVariable for each bin')
         self._bin_dist_rvs = [RandomVariable(**self.rv_bins_kws).fit(d) for d in bins_data_mapper]
 
         #fit calibrated classifier
@@ -248,6 +254,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
             self.estimator = self.calibrated_classifier.calibrated_classifiers_[0].base_estimator
         else:
             #fit classifier
+            print('fitting estimator')
             self.estimator.fit(X = X, y = y_transformed, **estimator_fit_kws)
 
         return self
@@ -265,7 +272,7 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
             probas = self.estimator.predict_proba(X)
             return np.array(probas)
 
-    def custom_predict(self, X, agg_func = np.mean, sample_size = 100, weight_func = None, alpha = None, replace = True, noise_factor = 0):
+    def custom_predict(self, X, agg_func = np.mean, sample_size = 1000, weight_func = None, alpha = None, replace = True, noise_factor = 0):
         '''
         performs aggregation in a samples drawn for a specific X and returns the custom predicted value
         as the result of the aggregation. Could be mean, mode, median, std, entropy, likelihood...
@@ -282,15 +289,6 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         Generate RV samples from bins of 1 observation
         '''
         assert len(bin_probas.shape) == 2, f'Passed weights array should be 2d not {bin_probas.shape}'
-        #sample_sizes = np.round(sample_size*weights_array,0)
-        #delta_sample_sizes = sample_size - sample_sizes.sum(axis = 0)
-        # make sample_sizes sum up to sample_size <- there might be a better way to do it
-        #assert delta_sample_sizes >= 0, 'sample_size sanity check not passed, delta negative'
-        #if delta_sample_sizes > 0:
-        #    idxs = sample_idxs(weights_array, sample_size = delta_sample_sizes)
-        #    idxs, counts = numpy.unique(a, return_counts=True)
-        #    for i in range(idxs.shape[0]):
-        #        sample_sizes[idxs[i]] += counts[i]
         #SAMPLE ALL KDES AND THE SAMPLE FROM SAMPLED ARRAY
         samples_dist = np.array([bin_dist.sample(sample_size) for bin_dist in self._bin_dist_rvs])
 
@@ -298,17 +296,16 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         samples_dist = samples_dist[:,:,0]
         idxs = sample_idxs(bin_probas, sample_size = sample_size)
         samples = []
+        print('Sampling data from bins...')
         for i in tqdm(np.arange(bin_probas.shape[0])):
             idx = idxs[i]
             idx, counts = np.unique(idx, return_counts = True)
             s = [np.random.choice(samples_dist[i],c, replace = True) for i,c in zip(idx,counts)]
-            #s = [self._bin_dist_rvs[vc[0]].rvs(sample_size = vc[1]).flatten() for vc in value_counts]
 
             samples.append(np.concatenate(s))
-            #samples.append(np.concatenate(s))
         return np.array(samples)
 
-    def sample(self, X, sample_size = 100, weight_func = None, alpha = None, replace = True, noise_factor = 0):
+    def sample(self, X, sample_size = 1000, weight_func = None, alpha = None, replace = True, noise_factor = 0):
         '''
         weight func is a function that takes weight array (n_dists, n_bins) and returned
         an array of the same shape but with desired processing of the weights. if weight_func is not None,
@@ -323,7 +320,6 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         if self.y_dim == 1:
             bins_probas = _add_n_dists_axis(bins_probas)
 
-        bins_probas = _fix_X_1d(bins_probas)
         # for 1d case
         bins_probas = bins_probas[0,:,:]
         if not weight_func is None:
@@ -331,36 +327,19 @@ class EntropyEstimator(BaseEstimator, DelegateEstimatorMixIn):
         else:
             bins_probas = normalize(bins_probas**alpha, norm = 'l1')
 
-        #samples = []
-        #for dim_dist in bins_probas:
-        #    dim_dist = _fix_X_1d(dim_dist)
-        #    if not weight_func is None:
-        #        bin_probas = normalize(weight_func(dim_dist), norm  = 'l1')
-        #    else:
-        #        bin_probas = normalize(dim_dist**alpha, norm = 'l1')
-
-        #    sampled_bins = sample_idxs(bin_probas, sample_size, replace)
-            #reshape in order to work with the QuantileTransformer inverse_transform foe each iteration
-            #sampled_bins = sampled_bins.reshape(*sampled_bins.shape, 1)
-            #samples.append(sampled_bins)
-
-        #samples = np.array([self._q_transformer_inverse_transform(sb) for sb in samples])
-        #samples = np.array(samples)
-        #samples = np.moveaxis(samples, 2,1)
-        #samples = np.moveaxis(samples, 0,2)
-
-        #samples = np.array([self._q_transformer_inverse_transform(s) for s in samples])
         samples = self._rv_bin_sample(bins_probas, sample_size)
         samples = _add_n_dims_axis(samples) # make a 3d sample array with dim axis = 1
         noise = agg_smallest_distance(samples, agg_func = np.std)
         noise = _add_n_dims_axis(noise)
         return add_noise(samples, noise_factor*noise)
 
-    def density(self, X, dist = 'kde', sample_size = 100, weight_func = None, alpha = None, replace = True, noise_factor = 1e-7, **dist_kws):
+    def density(self, X, dist = 'empirical', sample_size = 1000, weight_func = None, alpha = None, replace = True, noise_factor = 1e-7, **dist_kws):
         '''
         returns a RVArray instance of RandomVariable objects fitted on sampled data based on X and other sample params
         '''
         samples = self.sample(X, sample_size, weight_func, alpha, replace, noise_factor)
+
+        print('Fitting random variable objects for each dsitribution...')
         rv_objects = [RandomVariable(keep_samples = False).fit(sample, dist, **dist_kws) for sample in tqdm(samples)]
         return RVArray(rv_objects)
 
@@ -429,7 +408,7 @@ class TreeEstimatorMixin():
         slices = [slice(i[0],i[1]) for i in zip(s2,s1)]
         idxs = node_matrix.tocsc().indices
         idxs = [idxs[s] for s in slices]
-        return (y[idx] for idx in tqdm(idxs))
+        return (y[idx] for idx in idxs)
 
     def _make_node_kde_array(self): #<- since kde esitmation is the best approach, save kde fitted instances for each node
         #to make use of it during node and node_data wieght inference
@@ -451,14 +430,31 @@ class TreeEstimatorMixin():
         return applied_arr.reshape(dim1_shape, dim2_shape)
 
 
-    def _fit_leaf_node_matrix(self, X, y, node_rank_func, node_data_rank_func):
+    def _fit_leaf_node_matrix(self, X, y, node_rank_func, node_data_rank_func, max_nodes = None, max_data = None, sample_weight = None):
+
         nodes_array = self._apply(X)
 
+        self._leaf_node_transformer = OneHotEncoder(handle_unknown = 'ignore')
 
-        self._leaf_node_trnasformer = OneHotEncoder()
+        leaf_node_matrix = self._leaf_node_transformer.fit_transform(nodes_array)
+        if max_nodes is None:
+            self._keep_nodes_in_query = slice(None)
+        else:
+            if 0 < max_nodes <= 1:
+                #case max_nodes is fraction
+                max_nodes = max(1,int(max_nodes*leaf_node_matrix.shape[1]))
+            self._keep_nodes_in_query = np.random.choice(np.arange(leaf_node_matrix.shape[1]), size = max_nodes, replace = False)
 
-        leaf_node_matrix = self._leaf_node_trnasformer.fit_transform(nodes_array)
+        if max_data is None:
+            self._keep_data_in_query = slice(None)
+        else:
+            if 0 < max_data <= 1:
+                #case max_data is fraction
+                max_data = max(1,int(max_data*leaf_node_matrix.shape[0]))
+            self._keep_data_in_query = np.random.choice(np.arange(leaf_node_matrix.shape[0]), size = max_nodes, replace = False, p = sample_weight)
 
+        leaf_node_matrix = leaf_node_matrix[self._keep_data_in_query, :]
+        leaf_node_matrix = leaf_node_matrix[:, self._keep_nodes_in_query]
         self._raw_leaf_node_matrix = leaf_node_matrix
         #self._node_data_generator = self.#self._make_node_data_generator(y, leaf_node_matrix)
         self._leaf_node_weights = self._calculate_node_weights(y, leaf_node_matrix, node_rank_func)
@@ -466,10 +462,11 @@ class TreeEstimatorMixin():
         return self
 
     def _transform_query_matrix(self, X):
-
-        return  self._make_weighted_query_vector(
+        node_matrix = self._leaf_node_transformer.transform(self._apply(X))
+        node_matrix = node_matrix[:, self._keep_nodes_in_query]
+        return self._make_weighted_query_vector(
             agg_node_weights = self._leaf_node_weights,
-            node_matrix = self._leaf_node_trnasformer.transform(self._apply(X)))
+            node_matrix = node_matrix)
 
 
     def _query_idx_and_sim(self, X, n_neighbors, lower_bound, beta, gamma):
@@ -485,7 +482,7 @@ class TreeEstimatorMixin():
         Works only for marginal distributions
         '''
         nodes_array = self._apply(X)
-        forest_embeddings = self._leaf_node_trnasformer.transform(nodes_array)
+        forest_embeddings = self._leaf_node_transformer.transform(nodes_array)
         samples = self.entropy_estimator_sampler.sample(forest_embeddings, sample_size, weight_func, alpha, noise_factor)
         return samples
 
@@ -495,8 +492,8 @@ class TreeEstimatorMixin():
         Works only for marginal distributions
         '''
         nodes_array = self._apply(X)
-        self._leaf_node_trnasformer = OneHotEncoder()
-        forest_embeddings = self._leaf_node_trnasformer.fit_transform(nodes_array)
+        self._leaf_node_transformer = OneHotEncoder()
+        forest_embeddings = self._leaf_node_transformer.fit_transform(nodes_array)
         self.entropy_estimator_sampler.fit(forest_embeddings, y, **fit_kws)
         return self
 
@@ -508,12 +505,14 @@ class TreeEstimatorMixin():
 
         p = self._handle_sample_weights(weight_func = weight_func, sim = sim, alpha = alpha)
         samples = []
-        for i in tqdm(np.arange(len(idx))):
+        for i in np.arange(len(idx)):
             ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
+            if len(ys.shape) == 1:
+                ys = ys.reshape(-1,1)
             noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
             ys = add_noise(ys, noise_factor*noise)
             samples.append(RandomVariable(**rv_kwargs).fit(ys, sample_weight = None).sample(sample_size = sample_size))
-            #try
+
 
         return np.array(samples)
 
@@ -526,8 +525,10 @@ class TreeEstimatorMixin():
 
         p = self._handle_sample_weights(weight_func = weights, sim = sim, alpha = alpha)
         samples = []
-        for i in tqdm(np.arange(len(idx))):
+        for i in np.arange(len(idx)):
             ys = self.y_[sample_multi_dim(idx[i], sample_size = sample_size, weights = p[i], axis = 0)]
+            if len(ys.shape) == 1:
+                ys = ys.reshape(-1,1)
             noise = agg_smallest_distance(ys.reshape(1,*ys.shape), agg_func = np.std)
             ys = add_noise(ys, noise_factor*noise)
             samples.append(ys)
@@ -658,8 +659,8 @@ class TreeEstimatorMixin():
         return node_matrix
 
 # Cell
-
-class KernelTreeEstimator(BaseEstimator, DelegateEstimatorMixIn ,TreeEstimatorMixin):
+#MAKE WARNING REGARDING NUMBER OF NODES IN TREE TAKING KNEIGHBORS QUERY INTO ACCOUNT, mayvbe set max_leaf_nodes automatically
+class KernelTreeEstimator(BaseEstimator, ClassifierMixin, DelegateEstimatorMixIn ,TreeEstimatorMixin):
 
     def __init__(self, estimator, entropy_estimator_sampler = None, alpha = 1, beta = 1, gamma = 1, node_rank_func = None,
                  node_data_rank_func = None,n_neighbors = 30, lower_bound = 0.0):
@@ -697,13 +698,17 @@ class KernelTreeEstimator(BaseEstimator, DelegateEstimatorMixIn ,TreeEstimatorMi
     def __repr__(self):
         return self.__class__.__name__
 
-    def fit(self, X, y = None, **fit_kws):
+    def fit(self, X, y = None, sample_weight = None, **fit_kws):
 
+        #fix y shape
         if len(y.shape) == 1:
             y = y.reshape(-1,1)
 
-        self.y_ = y
-        self.estimator.fit(X, y, **fit_kws)
+        try:
+            self.estimator.fit(X, y, sample_weight = sample_weight, **fit_kws)
+        except TypeError:
+            self.estimator.fit(X, y, **fit_kws)
+
 
         if self.entropy_estimator_sampler is None:
             self._fit_leaf_node_matrix(
@@ -711,9 +716,11 @@ class KernelTreeEstimator(BaseEstimator, DelegateEstimatorMixIn ,TreeEstimatorMi
         else:
             self._fit_entropy_estimator_sampler(X, y)
 
+        self.y_ = y
+
         return self
 
-    def density(self, X, dist = 'kde', sample_size = 10, weight_func = None, n_neighbors = None,
+    def density(self, X, dist = 'kde', sample_size = 1000, weight_func = None, n_neighbors = None,
                lower_bound = None, alpha = None, beta = None, gamma = None, noise_factor = 1e-7, **dist_kwargs):
 
         n_neighbors, lower_bound, alpha, beta, gamma = self._handle_similarity_sample_parameters(
@@ -722,7 +729,7 @@ class KernelTreeEstimator(BaseEstimator, DelegateEstimatorMixIn ,TreeEstimatorMi
         return super()._density(X, dist, sample_size, weight_func, n_neighbors,
                lower_bound, alpha, beta, gamma, noise_factor, **dist_kwargs)
 
-    def sample(self, X, sample_size = 10, weight_func = None, n_neighbors = None,
+    def sample(self, X, sample_size = 1000, weight_func = None, n_neighbors = None,
                lower_bound = None, alpha = None, beta = None, gamma = None, noise_factor = 0):
         '''wieghts should be callable (recieves array returns array of same shape) or None'''
 
@@ -741,7 +748,7 @@ class KernelTreeEstimator(BaseEstimator, DelegateEstimatorMixIn ,TreeEstimatorMi
         return samples
 
     def custom_predict(
-        self, X, agg_func, sample_size = 100, weights = None, n_neighbors = None,
+        self, X, agg_func, sample_size = 1000, weights = None, n_neighbors = None,
         lower_bound = None, alpha = None, beta = None, gamma = None, noise_factor = 0
     ):
         n_neighbors, lower_bound, alpha, beta, gamma = self._handle_similarity_sample_parameters(n_neighbors, lower_bound, alpha, beta, gamma)
@@ -771,98 +778,146 @@ class KernelTreeEntropyEstimator(KernelTreeEstimator):
     '''
     An ensemble that learn representitons of data turning target into bins
     '''
-    def __init__(self, estimator, entropy_estimator_sampler = None, resolution = 100, alpha = 1, beta = 1, gamma = 1, node_rank_func = None,
-                 node_data_rank_func = None,n_neighbors = 30, lower_bound = 0.0):
 
+    def __init__(self, estimator, entropy_estimator_sampler=None, resolution='auto', class_weight=None, alpha=1, beta=1, gamma=1, node_rank_func=None,
+                 node_data_rank_func=None, n_neighbors=30, lower_bound=0.0):
+
+        assert hasattr(estimator, 'predict_proba') or 'predict_proba' in dir(
+            estimator), 'estimator should implement `predict_proba` method'
         super().__init__(estimator, entropy_estimator_sampler, alpha, beta, gamma, node_rank_func,
-                 node_data_rank_func,n_neighbors, lower_bound)
+                         node_data_rank_func, n_neighbors, lower_bound)
 
+        self.class_weight = class_weight
         self.resolution = resolution
-
 
     def _q_transformer_fit(self, y):
         '''
         fits self.q_transformer
         '''
-        y = _fix_X_1d(y)
+
+        if len(y.shape) == 1:
+            y = _fix_X_1d(y)
+
         if type(self.resolution) == str:
-            self.bin_edges = [np.histogram_bin_edges(col, bins = self.resolution) for col in y.T]
+            self.bin_edges = [np.histogram_bin_edges(
+                col, bins=self.resolution) for col in y.T]
+            print(
+                f'base classifier will be trained with {[len(i) for i in self.bin_edges]} classes')
             return self.bin_edges
 
+        elif type(self.resolution) == np.ndarray:
+            self.bin_edges = [self.resolution for col in y.T]
+
         elif type(self.resolution) == int:
-            self.q_transformer = QuantileTransformer(n_quantiles = self.resolution)
+            self.q_transformer = QuantileTransformer(
+                n_quantiles=self.resolution)
             self._q_minmax_scaler = MinMaxScaler()
             y = self.q_transformer.fit_transform(y)
-            #for case when output_distribution != uniform
+            # for case when output_distribution != uniform
             self._q_minmax_scaler.fit(y)
             return self.q_transformer
 
-        elif isinstance(self.resolution,list):
+        elif isinstance(self.resolution, list):
+            assert len(self.resolution) == y.shape[-1], f'len of resolution list should be equal n_dims of y. got {len(self.resolution)} and {y.shape[-1]}'
             return self.resolution
 
-        else: raise TypeError(f'self.resolution should be Array of bin edges, str or int, got {self.resolution.__class__}')
-
-
+        else:
+            raise TypeError(
+                f'self.resolution should be np.array of bin edges, str or int, got {self.resolution.__class__}')
 
     def _q_transformer_transform(self, y):
         '''
         maps floats to int (bin_id in histogram)
         '''
-        y = _fix_X_1d(y)
+        if len(y.shape) == 1:
+            y = _fix_X_1d(y)
 
-        if type(self.resolution) == str:
-            y_transformed = [np.digitize(y[:,i:i+1], self.bin_edges[i]) for i in range(y.shape[-1])]
+        if type(self.resolution) in (str, np.ndarray):
+            y_transformed = [np.digitize(
+                y[:, i:i+1], self.bin_edges[i]) for i in range(y.shape[-1])]
             y_transformed = np.hstack(y_transformed)
 
         elif type(self.resolution) == int:
             y_transformed = self.q_transformer.transform(y)
-            #scale between 0 and 1
+            # scale between 0 and 1
             y_transformed = self._q_minmax_scaler.transform(y_transformed)
-            y_transformed = np.around(y_transformed*(self.resolution - 1), decimals = 0).astype(int)
+            y_transformed = np.around(
+                y_transformed*(self.resolution - 1), decimals=0).astype(int)
 
         elif isinstance(self.resolution, list):
-            y_transformed = [np.digitize(y[:,i:i+1], self.resolution[i]) for i in range(y.shape[-1])]
+            y_transformed = [np.digitize(
+                y[:, i:i+1], self.resolution[i]) for i in range(y.shape[-1])]
             y_transformed = np.hstack(y_transformed)
+        else:
+            raise TypeError(
+                    f'self.resolution should be np.array of bin edges, str or int, got {self.resolution.__class__}')
 
         return y_transformed
 
-    def _q_transformer_inverse_transform(self,y):
+    def _q_transformer_inverse_transform(self, y):
         '''
         maps from bin_id in histogram (int) to float.
         beware that during transform, information is lost due to downsampling, so inverse_transform will
         not be an exact inverse_transform.
         '''
-        y = _fix_X_1d(y)
+        if len(y.shape) == 1:
+            y = _fix_X_1d(y)
+
         if type(self.resolution) == int:
             y_transformed = (y/(self.resolution - 1)).astype(float)
-            y_transformed = self._q_minmax_scaler.inverse_transform(y_transformed)
-            return self.q_transformer.inverse_transform(y_transformed).flatten() #1d asserted already
-        else: raise NotImplementedError('inverse transform only implemented for case when self.resolution == int')
+            y_transformed = self._q_minmax_scaler.inverse_transform(
+                y_transformed)
+            # 1d asserted already
+            return self.q_transformer.inverse_transform(y_transformed).flatten()
+        else:
+            raise NotImplementedError(
+                'inverse transform only implemented for case when self.resolution == int')
 
     def _preprocess_y(self, y):
 
         if len(y.shape) == 1:
-            y = y.reshape(-1,1)
-        #save y values
-        self.y_ = y
-        #reshape (-1,1) in case of 1d
-        y = _fix_X_1d(y)
-        #make uniform quantile bins
+            y = y.reshape(-1, 1)
+        # make uniform quantile bins
         self._q_transformer_fit(y)
         y = self._q_transformer_transform(y)
         return y
 
-    def fit(self, X, y = None, preprocess_y = True, **fit_kws):
+    def _handle_sample_weight(self, sample_weight, y, sample_alpha):
 
-        if preprocess_y:
-            y = self._preprocess_y(y)
+        if self.class_weight == 'balanced':
+            class_weight = compute_sample_weight(class_weight='balanced', y=y)
+            if not sample_weight is None:
+                sample_weight = sample_weight*class_weight**sample_alpha
+            else:
+                sample_weight = class_weight**sample_alpha
 
-        # fit
-        self.estimator.fit(X,y, **fit_kws)
+        return sample_weight
 
+    def fit(self, X, y=None, y_prep=None, sample_weight=None, sample_alpha=1, **fit_kws):
+
+        # digitize y
+        if y_prep is None:
+            y_prep = self._preprocess_y(y)
+        else:
+            assert y_prep.shape[0] == y.shape[0], f'y_prep and y should have same shape. got {y_prep.shape[0]} and {y.shape[0]}'
+
+        sample_weight = self._handle_sample_weight(
+            sample_weight, y_prep, sample_alpha)
+
+        # fit base estimator
+        try:
+            self.estimator.fit(
+                X, y_prep, sample_weight=sample_weight, **fit_kws)
+        except TypeError:
+            self.estimator.fit(X, y_prep, **fit_kws)
+
+        # save y continuous values
+        self.y_ = y
+
+        # fit leaf node matrix with tree nodes and its respective continuous values (y)
         if self.entropy_estimator_sampler is None:
             self._fit_leaf_node_matrix(
-                X, self.y_, node_rank_func = self.node_rank_func, node_data_rank_func = self.node_data_rank_func)# <- MAKE NODE WIEGHTED VERSION
+                X, y, node_rank_func=self.node_rank_func, node_data_rank_func=self.node_data_rank_func)  # <- MAKE NODE WIEGHTED VERSION
         else:
             self._fit_entropy_estimator_sampler(X, y)
 
@@ -875,19 +930,18 @@ class JointEntropyEstimator(MultiOutputClassifier):
     All the marginal distributions are merged using a KernelTreeEntropyEstimator, that nativelly supports
     joint estimation
     '''
-    def __init__(self, estimator, resolution = 20, joint_estimator=None, stacking_method='auto', n_jobs=None):
+    def __init__(self, estimator, resolution = 'auto', joint_tree_estimator=None, stacking_method='auto', n_jobs=None, **joint_tree_kwargs):
         assert hasattr(
-            estimator, 'predict_proba'), 'Estimator should have `predict_proba` method'
+            estimator, 'predict_proba') or ('predict_proba' in dir(estimator)), 'Estimator should have `predict_proba` method'
         super().__init__(estimator, n_jobs)
-        if joint_estimator is None:
+        if joint_tree_estimator is None:
             rf = ensemble.RandomForestClassifier(
-                n_estimators=20, min_samples_leaf=10, )
-            self.joint_estimator = KernelTreeEntropyEstimator(
-                rf, resolution=resolution)
+                n_estimators=10, min_samples_leaf=10, )
+            self.joint_tree_estimator = KernelTreeEntropyEstimator(
+                rf, resolution=resolution, **joint_tree_kwargs)
         else:
-            assert isinstance(
-                joint_estimator, KernelTreeEntropyEstimator), 'joint_estimator should be instance of KernelTreeEntropyEstimator'
-            self.joint_estimator = joint_estimator
+            self.joint_tree_estimator = KernelTreeEntropyEstimator(
+                joint_tree_estimator, resolution=resolution, **joint_tree_kwargs)
 
         self.stacking_method = stacking_method
         self.resolution = resolution
@@ -916,11 +970,11 @@ class JointEntropyEstimator(MultiOutputClassifier):
         return np.hstack(predictors)
 
     def fit(self, X, y=None, sample_weight=None):
-        y = self.joint_estimator._preprocess_y(y)
-        super().fit(X, y, sample_weight)
+        y_prep = self.joint_tree_estimator._preprocess_y(y)
+        super().fit(X, y_prep, sample_weight)
         marginal_results = self._make_stacked_predictors(
             X, self.stacking_method)
-        self.joint_estimator.fit(marginal_results, y, preprocess_y = False)
+        self.joint_tree_estimator.fit(marginal_results, y, y_prep = y_prep)
         return self
 
     def sample(self, X, sample_size=10, weight_func=None, n_neighbors=None, lower_bound=None,
@@ -929,7 +983,7 @@ class JointEntropyEstimator(MultiOutputClassifier):
         marginal_results = self._make_stacked_predictors(
             X, self.stacking_method)
 
-        return self.joint_estimator.sample(marginal_results, sample_size, weight_func, n_neighbors, lower_bound,
+        return self.joint_tree_estimator.sample(marginal_results, sample_size, weight_func, n_neighbors, lower_bound,
                                            alpha, beta, gamma, noise_factor,)
 
     def density(self, X, dist='kde', sample_size=10, weight_func=None, n_neighbors=None, lower_bound=None,
@@ -938,7 +992,7 @@ class JointEntropyEstimator(MultiOutputClassifier):
         marginal_results = self._make_stacked_predictors(
             X, self.stacking_method)
 
-        return self.joint_estimator.density(marginal_results, dist, sample_size, weight_func, n_neighbors, lower_bound,
+        return self.joint_tree_estimator.density(marginal_results, dist, sample_size, weight_func, n_neighbors, lower_bound,
                                             alpha, beta, gamma, noise_factor, **dist_kwargs,)
 
     def custom_predict(self, X, agg_func, sample_size=100, weights=None, n_neighbors=None,
@@ -947,11 +1001,11 @@ class JointEntropyEstimator(MultiOutputClassifier):
         marginal_results = self._make_stacked_predictors(
             X, self.stacking_method)
 
-        return self.joint_estimator.custom_predict(marginal_results, agg_func, sample_size, weights,
+        return self.joint_tree_estimator.custom_predict(marginal_results, agg_func, sample_size, weights,
                                                    n_neighbors, lower_bound, alpha, beta, gamma, noise_factor,)
 
 
-class ChainedEntropyEstimator():
+class ChainedEntropyEstimator(MultiOutputClassifier):
     '''
     make chained joint estimator based on previous estimations
     there are three ways to pass predictors to next estimator in the chain:
@@ -964,7 +1018,7 @@ class ChainedEntropyEstimator():
         raise NotImplementedError('ChainedEntropyEstimator is not implemented yet')
 
 
-class JointKernelTreeEstimator(MultiOutputRegressor):
+class JointKernelTreeEstimator(MultiOutputClassifier):
 
     '''Custom multioutput for multioutput estimator for `KernelTreeEstimator`s'''
 
@@ -979,7 +1033,7 @@ class JointKernelTreeEstimator(MultiOutputRegressor):
         sampled_idxs = np.hstack([
             _fix_X_1d(estim._similarity_sample_idx(X, sample_size, weights, n_neighbors,
                                                    lower_bound, alpha, beta, gamma)
-                      ) for estim in tqdm(self.estimators_)
+                      ) for estim in self.estimators_
         ])
 
         return sampled_idxs

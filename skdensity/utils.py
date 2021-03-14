@@ -91,7 +91,9 @@ def _fix_one_sample_2d(X):
     given an array of shape (n_samples, n_dims)
     '''
     try: return _assert_dim_3d(X)
-    except: return X.reshape(X.shape[0], 1, X.shape[1])
+    except:
+        _assert_dim_2d(X)
+        return X.reshape(X.shape[0], 1, X.shape[1])
 
 def _fix_one_dist_2d(X):
     '''
@@ -99,7 +101,9 @@ def _fix_one_dist_2d(X):
     given an array of shape (n_sample_per_distribution,n_dims)
     '''
     try: return _assert_dim_3d(X)
-    except: return X.reshape(1, X.shape[0], X.shape[1])
+    except:
+        _assert_dim_2d(X)
+        return X.reshape(1, X.shape[0], X.shape[1])
 
 def _fix_dist_1d(X):
     '''
@@ -107,7 +111,9 @@ def _fix_dist_1d(X):
     given an array of shape (n_distributions, n_sample_per_distribution)
     '''
     try: return _assert_dim_3d(X)
-    except: return X.reshape(X.shape[0], X.shape[1], 1)
+    except:
+        _assert_dim_2d(X)
+        return X.reshape(X.shape[0], X.shape[1], 1)
 
 def _fix_one_dist_1d(X):
     '''
@@ -115,7 +121,9 @@ def _fix_one_dist_1d(X):
     given an array of shape (n_sample_per_distribution,)
     '''
     try: return _assert_dim_3d(X)
-    except: return X.reshape(1, X.shape[0], 1)
+    except:
+        _assert_dim_2d(X)
+        return X.reshape(1, X.shape[0], 1)
 
 def _vector_1d_to_matrix(X):
     '''Makes 1d array a 2d column matrix'''
@@ -125,10 +133,19 @@ def _vector_1d_to_matrix(X):
     return X
 
 def _fix_X_1d(X):
-    '''Makes 1d array a 2d one'''
+    '''
+    Makes 1d vector array a 2d column one.
+    throw error if n_dims > 2 or X.shape[1] > 1
+    '''
     #X = np.array(X)
     #reshape if shape == (n_samples,)
-    X = X if len(X.shape) > 1 else X.reshape(-1,1)
+    assert len(X.shape) <= 2, f'X shape should be <= 2, got {len(X.shape)}'
+    if len(X.shape) == 2:
+        assert X.shape[-1] == 1, f'X.shape[1] expected to be 1, got {X.shape[-1]} instead'
+        X = X
+    else:
+        X = X.reshape(-1,1)
+
     return X
 
 def _assert_dim_3d(X):
@@ -323,7 +340,7 @@ def make_batches(arr, batch_size = 100):
             batches.append(arr[(i + 1) * batch_size:])
     return batches
 
-def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, beta = 1, gamma = 1, n_jobs = None):
+def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, beta = 1, gamma = 1, n_jobs = None, n_batches = 100):
     '''make cos similarity query of query_vector on query_space
     beta is a weightening factor such that query_space = normalize(query_space^beta)
     beta greater than one ensure higher magnitude components recieves more importance when querying
@@ -342,10 +359,11 @@ def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, be
     try:
         query_space = query_space.T
         if n_jobs is None:
-            sim_matrix = awesome_cossim_topn(query_vector, query_space,ntop=n_neighbors, lower_bound=lower_bound,)
-
+            batches = make_batches(query_vector, batch_size = np.ceil(query_vector.shape[0]/n_batches).astype(int))
+            sim_matrix = [awesome_cossim_topn(qv, query_space,ntop=n_neighbors, lower_bound=lower_bound,) for qv in tqdm(batches)]
+            sim_matrix = scipy.sparse.vstack(sim_matrix)
         else:
-            batches = make_batches(query_vector, batch_size = np.ceil(query_vector.shape[0]/4).astype(int))
+            batches = make_batches(query_vector, batch_size = np.ceil(query_vector.shape[0]/n_batches).astype(int))
 
             sim_matrix = Parallel(n_jobs=n_jobs, verbose=1,
                                    **_joblib_parallel_args(prefer="threads"))(
@@ -356,11 +374,10 @@ def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, be
             sim_matrix = scipy.sparse.vstack(sim_matrix)
 
         sim_matrix = scipy.sparse.csr_matrix(sim_matrix)
-
+        print('Postprocessing query results...')
         idx = []
         sim = []
         arr_sizes = []
-        #VERY SLOW!!!!!
         for d in sim_matrix:
             s = d.data
             i = d.nonzero()[1]
@@ -376,6 +393,8 @@ def cos_sim_query(query_vector, query_space, n_neighbors=50, lower_bound=0.0, be
         return  idx, sim
 
     except NameError: #in case sparse_dot_topn is not instaled
+        print('''sparse_dot_topn not installed. Neighbors query will use
+        sklearn NearestNeighbor, which may take a while for sparse matrix query''')
         dist, idx = (
             NearestNeighbors(n_neighbors = n_neighbors, radius = 1 - lower_bound, metric = 'cosine', n_jobs = -1)
             .fit(query_space)

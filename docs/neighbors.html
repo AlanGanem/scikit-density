@@ -1,6 +1,6 @@
 ---
 
-title: Weighted KNN DensityEstimator
+title: Weighted KNN density estimator cvxpy
 
 
 keywords: fastai
@@ -52,141 +52,27 @@ nb_path: "notebooks\05_neighbors.ipynb"
 <div class="inner_cell">
     <div class="input_area">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
-<span class="kn">import</span> <span class="nn">torch</span>
-<span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">nn</span>
-<span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
-<span class="kn">from</span> <span class="nn">torchvision.datasets</span> <span class="kn">import</span> <span class="n">MNIST</span>
-<span class="kn">from</span> <span class="nn">torch.utils.data</span> <span class="kn">import</span> <span class="n">DataLoader</span><span class="p">,</span> <span class="n">random_split</span>
-<span class="kn">from</span> <span class="nn">torchvision</span> <span class="kn">import</span> <span class="n">transforms</span>
-<span class="kn">import</span> <span class="nn">pytorch_lightning</span> <span class="k">as</span> <span class="nn">pl</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">sparse</span>
+<span class="kn">from</span> <span class="nn">scipy.optimize</span> <span class="kn">import</span> <span class="n">minimize</span>
+
+<span class="kn">from</span> <span class="nn">skdensity.utils</span> <span class="kn">import</span> <span class="n">cos_sim_query</span><span class="p">,</span> <span class="n">sample_from_dist_array</span><span class="p">,</span> <span class="n">sparse_mul_row</span><span class="p">,</span> <span class="n">make_bimodal_regression</span><span class="p">,</span><span class="n">make_distplot</span>
+
+<span class="kn">from</span> <span class="nn">skdensity.metrics</span> <span class="kn">import</span> <span class="n">kde_entropy</span><span class="p">,</span> <span class="n">quantile</span><span class="p">,</span> <span class="n">bimodal_variance</span><span class="p">,</span> <span class="n">marginal_variance</span>
 </pre></div>
 
     </div>
 </div>
 </div>
-
-</div>
-    {% endraw %}
-
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">LitAutoEncoder</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
-
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">))</span>
-
-    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
-        <span class="c1"># in lightning, forward defines the prediction/inference actions</span>
-        <span class="n">embedding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">embedding</span>
-
-    <span class="k">def</span> <span class="nf">training_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">):</span>
-        <span class="c1"># training_step defined the train loop. It is independent of forward</span>
-        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">batch</span>
-        <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-        <span class="n">z</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="n">x_hat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span><span class="p">(</span><span class="n">z</span><span class="p">)</span>
-        <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">mse_loss</span><span class="p">(</span><span class="n">x_hat</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s1">&#39;train_loss&#39;</span><span class="p">,</span> <span class="n">loss</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">loss</span>
-
-    <span class="k">def</span> <span class="nf">configure_optimizers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">optimizer</span>
-    
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-</div>
-    {% endraw %}
-
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">LitAutoEncoder</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
-    <span class="k">def</span> <span class="nf">training_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">,</span> <span class="n">optimizer_idx</span><span class="p">):</span>
-        <span class="c1"># access your optimizers with use_pl_optimizer=False. Default is True</span>
-        <span class="p">(</span><span class="n">opt_a</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span><span class="p">(</span><span class="n">use_pl_optimizer</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-
-        <span class="n">loss_a</span> <span class="o">=</span> <span class="o">...</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_a</span><span class="p">,</span> <span class="n">opt_a</span><span class="p">)</span>
-        <span class="n">opt_a</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-        <span class="n">opt_a</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
-
-        <span class="n">loss_b</span> <span class="o">=</span> <span class="o">...</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_b</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">,</span> <span class="n">retain_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_b</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">)</span>
-        <span class="n">opt_b</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-        <span class="n">opt_b</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-</div>
-    {% endraw %}
-
-</div>
- 
-
----
-
-title: Weighted KNN DensityEstimator
-
-
-keywords: fastai
-sidebar: home_sidebar
-
-
-
-nb_path: "notebooks\05_neighbors.ipynb"
----
-<!--
-
-#################################################
-### THIS FILE WAS AUTOGENERATED! DO NOT EDIT! ###
-#################################################
-# file to edit: notebooks\05_neighbors.ipynb
-# command to build the docs after a change: nbdev_build_docs
-
--->
-
-<div class="container" id="notebook-container">
-        
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
 
 </div>
     {% endraw %}
 
 <div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<ul>
-<li>weighted NN based on (possibly batch) grad descent of feature weights</li>
-<li>find optimizer engine</li>
-<li>find fast KNN for query time</li>
-<li>Define metric specific sampling function (based on distance)) (possibly optimize func hyperparams during training, like $\alpha$ for $P_{sample} = Dist^{-\alpha}$ and others)</li>
-<li>Define cost function (possibly a product of entropy/variance divided by the KL div from percentiles dist and flat dirichlet (hypercube))</li>
-<li>Study cvxpy</li>
-<li>study metric learn</li>
-</ul>
-
+<h2 id="Training-data">Training data<a class="anchor-link" href="#Training-data"> </a></h2>
 </div>
 </div>
 </div>
@@ -197,14 +83,7 @@ nb_path: "notebooks\05_neighbors.ipynb"
 
 <div class="inner_cell">
     <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
-<span class="kn">import</span> <span class="nn">torch</span>
-<span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">nn</span>
-<span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
-<span class="kn">from</span> <span class="nn">torchvision.datasets</span> <span class="kn">import</span> <span class="n">MNIST</span>
-<span class="kn">from</span> <span class="nn">torch.utils.data</span> <span class="kn">import</span> <span class="n">DataLoader</span><span class="p">,</span> <span class="n">random_split</span>
-<span class="kn">from</span> <span class="nn">torchvision</span> <span class="kn">import</span> <span class="n">transforms</span>
-<span class="kn">import</span> <span class="nn">pytorch_lightning</span> <span class="k">as</span> <span class="nn">pl</span>
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">,</span> <span class="n">X_test</span><span class="p">,</span> <span class="n">y_test</span> <span class="o">=</span> <span class="n">make_bimodal_regression</span><span class="p">(</span><span class="mi">10000</span><span class="p">,</span> <span class="n">random_state</span> <span class="o">=</span> <span class="mi">42</span><span class="p">,</span> <span class="n">bimodal_inbalance</span> <span class="o">=</span> <span class="mi">5</span><span class="p">)</span>
 </pre></div>
 
     </div>
@@ -221,32 +100,31 @@ nb_path: "notebooks\05_neighbors.ipynb"
 
 <div class="inner_cell">
     <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">LitAutoEncoder</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
-
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">))</span>
-
-    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
-        <span class="c1"># in lightning, forward defines the prediction/inference actions</span>
-        <span class="n">embedding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">embedding</span>
-
-    <span class="k">def</span> <span class="nf">training_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">):</span>
-        <span class="c1"># training_step defined the train loop. It is independent of forward</span>
-        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">batch</span>
-        <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-        <span class="n">z</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="n">x_hat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span><span class="p">(</span><span class="n">z</span><span class="p">)</span>
-        <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">mse_loss</span><span class="p">(</span><span class="n">x_hat</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s1">&#39;train_loss&#39;</span><span class="p">,</span> <span class="n">loss</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">loss</span>
-
-    <span class="k">def</span> <span class="nf">configure_optimizers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">optimizer</span>
-    
+<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">from</span> <span class="nn">time</span> <span class="kn">import</span> <span class="n">time</span>
+<span class="k">def</span> <span class="nf">train_func</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="c1"># draw batch from x</span>
+    <span class="c1">#X_train, y_train, </span>
+    <span class="n">n_samples</span> <span class="o">=</span> <span class="mi">40</span>
+    <span class="n">batch_size</span> <span class="o">=</span> <span class="n">X_train</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">//</span><span class="mi">5</span>
+    <span class="n">tic</span> <span class="o">=</span> <span class="n">time</span><span class="p">()</span>
+    <span class="n">n_neighbors</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+    <span class="n">weights</span> <span class="o">=</span> <span class="n">x</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="o">*</span><span class="nb">range</span><span class="p">(</span><span class="n">X_train</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])],</span> <span class="n">size</span> <span class="o">=</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">replace</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="n">X_batch</span><span class="p">,</span><span class="n">y_batch</span> <span class="o">=</span> <span class="n">X_train</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span> <span class="n">y_train</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+    <span class="c1"># transform search space and query vector through weights</span>
+    <span class="n">X_batch</span> <span class="o">=</span> <span class="n">sparse_mul_row</span><span class="p">(</span><span class="n">X_batch</span><span class="p">,</span> <span class="n">weights</span><span class="p">)</span>
+    <span class="n">X_</span> <span class="o">=</span> <span class="n">sparse_mul_row</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">weights</span><span class="p">)</span>
+    <span class="c1"># make query of idx and wieghts</span>
+    <span class="n">idx</span><span class="p">,</span> <span class="n">sim</span>  <span class="o">=</span> <span class="n">cos_sim_query</span><span class="p">(</span><span class="n">X_batch</span><span class="p">,</span> <span class="n">X_</span><span class="p">,</span> <span class="n">n_neighbors</span> <span class="o">=</span> <span class="n">n_neighbors</span><span class="p">)</span>
+    <span class="c1"># draw samples from y</span>
+    <span class="n">sampled_idxs</span> <span class="o">=</span> <span class="n">sample_from_dist_array</span><span class="p">(</span><span class="n">arr</span> <span class="o">=</span> <span class="n">idx</span><span class="p">,</span> <span class="n">size</span> <span class="o">=</span> <span class="n">n_samples</span><span class="p">,</span> <span class="n">weights</span> <span class="o">=</span> <span class="n">sim</span><span class="p">)[:,:,</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>        
+    <span class="n">samples</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">take</span><span class="p">(</span><span class="n">y_train</span><span class="p">,</span> <span class="n">indices</span> <span class="o">=</span> <span class="n">sampled_idxs</span><span class="p">,</span> <span class="n">axis</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="c1"># calculate variance</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">bimodal_var</span><span class="p">(</span><span class="n">samples</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="c1">#loss = -kde_entropy(quantile(y_batch,samples))[0]</span>
+    <span class="n">toc</span> <span class="o">=</span> <span class="n">time</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;iteration took {round(toc-tic,2)}s | loss: </span><span class="si">{loss}</span><span class="s1">&#39;</span><span class="p">)</span>    
+    <span class="k">return</span> <span class="n">loss</span>
 </pre></div>
 
     </div>
@@ -263,21 +141,8 @@ nb_path: "notebooks\05_neighbors.ipynb"
 
 <div class="inner_cell">
     <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">LitAutoEncoder</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
-    <span class="k">def</span> <span class="nf">training_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">,</span> <span class="n">optimizer_idx</span><span class="p">):</span>
-        <span class="c1"># access your optimizers with use_pl_optimizer=False. Default is True</span>
-        <span class="p">(</span><span class="n">opt_a</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span><span class="p">(</span><span class="n">use_pl_optimizer</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-
-        <span class="n">loss_a</span> <span class="o">=</span> <span class="o">...</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_a</span><span class="p">,</span> <span class="n">opt_a</span><span class="p">)</span>
-        <span class="n">opt_a</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-        <span class="n">opt_a</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
-
-        <span class="n">loss_b</span> <span class="o">=</span> <span class="o">...</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_b</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">,</span> <span class="n">retain_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_b</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">)</span>
-        <span class="n">opt_b</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-        <span class="n">opt_b</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">x0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">X_train</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span> <span class="mi">8</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">)])</span>
+<span class="n">f</span> <span class="o">=</span> <span class="n">train_func</span>
 </pre></div>
 
     </div>
@@ -287,52 +152,547 @@ nb_path: "notebooks\05_neighbors.ipynb"
 </div>
     {% endraw %}
 
-</div>
- 
-
----
-
-title: Weighted KNN DensityEstimator
-
-
-keywords: fastai
-sidebar: home_sidebar
-
-
-
-nb_path: "notebooks\05_neighbors.ipynb"
----
-<!--
-
-#################################################
-### THIS FILE WAS AUTOGENERATED! DO NOT EDIT! ###
-#################################################
-# file to edit: notebooks\05_neighbors.ipynb
-# command to build the docs after a change: nbdev_build_docs
-
--->
-
-<div class="container" id="notebook-container">
-        
     {% raw %}
     
 <div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">params</span> <span class="o">=</span> <span class="n">minimize</span><span class="p">(</span><span class="n">fun</span> <span class="o">=</span> <span class="n">f</span><span class="p">,</span> <span class="n">x0</span> <span class="o">=</span> <span class="n">x0</span><span class="p">,</span><span class="n">method</span> <span class="o">=</span> <span class="s1">&#39;CG&#39;</span><span class="p">,</span><span class="n">options</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;maxiter&#39;</span><span class="p">:</span><span class="mi">1000</span><span class="p">},)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>iteration took 0.6s | loss: 9921.617022167675
+iteration took 0.56s | loss: 9613.360734629226
+iteration took 0.59s | loss: 9745.231325271689
+iteration took 0.56s | loss: 9876.43035496605
+iteration took 0.59s | loss: 9058.224739814375
+iteration took 0.54s | loss: 9184.728424656654
+iteration took 0.57s | loss: 9907.755288934912
+iteration took 0.57s | loss: 9440.936946589085
+iteration took 0.55s | loss: 9394.337932207507
+iteration took 0.54s | loss: 8335.31292503648
+iteration took 0.57s | loss: 9276.387525419424
+iteration took 0.59s | loss: 9753.651839272803
+iteration took 0.56s | loss: 9772.860516843968
+iteration took 0.58s | loss: 9952.971544487384
+iteration took 0.58s | loss: 9556.869822576982
+iteration took 0.61s | loss: 9624.651710543767
+iteration took 0.6s | loss: 9110.515350661068
+iteration took 0.58s | loss: 9578.007501907416
+iteration took 0.6s | loss: 10389.985280641575
+iteration took 0.6s | loss: 9699.046453260462
+iteration took 0.58s | loss: 10564.476141254583
+iteration took 0.57s | loss: 8486.794341852945
+iteration took 0.58s | loss: 9243.419694767414
+iteration took 0.6s | loss: 9698.337071894171
+iteration took 0.58s | loss: 9728.472185911367
+iteration took 0.6s | loss: 10095.243635178305
+iteration took 0.57s | loss: 9664.149326780214
+iteration took 0.58s | loss: 9930.690839087265
+iteration took 0.58s | loss: 9944.743327686721
+iteration took 0.58s | loss: 9091.56812749366
+iteration took 0.58s | loss: 9880.739578208164
+iteration took 0.58s | loss: 10337.764966031775
+iteration took 0.56s | loss: 9561.340271599094
+iteration took 0.55s | loss: 9545.888310909286
+iteration took 0.6s | loss: 9190.089659314268
+iteration took 0.58s | loss: 9477.46358222284
+iteration took 0.55s | loss: 10513.63692011676
+iteration took 0.59s | loss: 9884.704174753972
+iteration took 0.6s | loss: 9396.238504358766
+iteration took 0.58s | loss: 9121.236765549666
+iteration took 0.59s | loss: 9525.253394714131
+iteration took 0.58s | loss: 9831.36863993385
+iteration took 0.58s | loss: 9822.655450409144
+iteration took 0.59s | loss: 9837.59792004359
+iteration took 0.6s | loss: 10174.52459509138
+iteration took 0.58s | loss: 9951.31535172509
+iteration took 0.61s | loss: 9093.606379911254
+iteration took 0.61s | loss: 9870.718527173682
+iteration took 0.57s | loss: 10066.278259630115
+iteration took 0.59s | loss: 9742.366803578032
+iteration took 0.61s | loss: 10024.979682078165
+iteration took 0.58s | loss: 9304.135853628031
+iteration took 0.56s | loss: 9629.115785797503
+iteration took 0.6s | loss: 9996.326348065882
+iteration took 0.58s | loss: 10370.730370182871
+iteration took 0.57s | loss: 9212.796615435258
+iteration took 0.56s | loss: 10097.251752045675
+iteration took 0.59s | loss: 9127.456934044412
+iteration took 0.57s | loss: 11087.025501779555
+iteration took 0.55s | loss: 9748.687158800223
+iteration took 0.57s | loss: 9981.013016845363
+iteration took 0.56s | loss: 10143.41688283169
+iteration took 0.58s | loss: 10463.044992944759
+iteration took 0.59s | loss: 9505.203080803132
+iteration took 0.59s | loss: 9631.162294855543
+iteration took 0.56s | loss: 10017.532648590319
+iteration took 0.55s | loss: 9124.297012344285
+iteration took 0.59s | loss: 9155.777305430178
+iteration took 0.56s | loss: 9001.56093404148
+iteration took 0.59s | loss: 9893.90821702721
+iteration took 0.6s | loss: 9552.319588684242
+iteration took 0.58s | loss: 10517.252078093961
+iteration took 0.56s | loss: 9212.761792755355
+iteration took 0.58s | loss: 9771.903789564369
+iteration took 0.65s | loss: 9299.93834761159
+iteration took 0.64s | loss: 8888.77639020373
+iteration took 0.64s | loss: 9792.516760749295
+iteration took 0.64s | loss: 9732.537252564618
+iteration took 0.64s | loss: 10091.995025952403
+iteration took 0.63s | loss: 9611.600288584625
+iteration took 0.67s | loss: 9645.0106805502
+iteration took 0.65s | loss: 9541.355274589758
+iteration took 0.67s | loss: 9885.57044556156
+iteration took 0.67s | loss: 9977.943686386277
+iteration took 0.72s | loss: 9420.905108492025
+iteration took 0.7s | loss: 10018.276757622292
+iteration took 0.7s | loss: 9174.59749963553
+iteration took 0.76s | loss: 9998.252880975917
+iteration took 0.71s | loss: 10098.41202167828
+iteration took 0.65s | loss: 10087.372089516108
+iteration took 0.55s | loss: 10059.1607289127
+iteration took 0.56s | loss: 9639.641351942433
+iteration took 0.58s | loss: 9190.439633485606
+iteration took 0.59s | loss: 9033.577570700305
+iteration took 0.59s | loss: 9391.394167824401
+iteration took 0.56s | loss: 10532.950175245182
+iteration took 0.58s | loss: 9331.884150637281
+iteration took 0.58s | loss: 9753.857088499106
+iteration took 0.62s | loss: 8966.944255958411
+iteration took 0.59s | loss: 9093.868894853142
+iteration took 0.55s | loss: 9304.709215706447
+iteration took 0.6s | loss: 10229.885927912668
+iteration took 0.59s | loss: 10229.005598547277
+iteration took 0.58s | loss: 9727.84610937025
+iteration took 0.6s | loss: 10076.914156821367
+iteration took 0.6s | loss: 9058.360480413448
+iteration took 0.62s | loss: 10296.943563070969
+iteration took 0.58s | loss: 9699.164000273102
+iteration took 0.59s | loss: 10091.774650361484
+iteration took 0.6s | loss: 10460.861718143038
+iteration took 0.58s | loss: 9472.57827520299
+iteration took 0.56s | loss: 10747.554871763476
+iteration took 0.58s | loss: 9263.381024612838
+iteration took 0.81s | loss: 9413.256439052007
+iteration took 0.58s | loss: 9649.880258185613
+iteration took 0.57s | loss: 8942.24016944419
+iteration took 0.6s | loss: 9569.66032462329
+iteration took 0.57s | loss: 9409.141730073809
+iteration took 0.56s | loss: 10785.588300686324
+iteration took 0.59s | loss: 9523.142955572921
+iteration took 0.58s | loss: 10239.75437533824
+iteration took 0.6s | loss: 9141.810242999945
+iteration took 0.58s | loss: 9414.09938261766
+iteration took 0.57s | loss: 8795.436175852808
+iteration took 0.55s | loss: 9818.156199093537
+iteration took 0.56s | loss: 8854.714359181975
+iteration took 0.58s | loss: 9136.537311475366
+iteration took 0.59s | loss: 9478.388906833607
+iteration took 0.58s | loss: 9556.474194386798
+iteration took 0.6s | loss: 9213.831980730965
+iteration took 0.6s | loss: 10142.984394397427
+iteration took 0.54s | loss: 10535.03126600808
+iteration took 0.56s | loss: 10086.4277706449
+iteration took 0.59s | loss: 9395.9559087428
+iteration took 0.56s | loss: 8898.571865462736
+iteration took 0.6s | loss: 9937.111173797586
+iteration took 0.56s | loss: 9030.407595181572
+iteration took 0.57s | loss: 9732.826946962465
+iteration took 0.58s | loss: 10039.381233187112
+iteration took 0.6s | loss: 9207.986457584895
+iteration took 0.61s | loss: 9418.683157294272
+iteration took 0.6s | loss: 9877.231787491699
+iteration took 0.61s | loss: 9909.560247344523
+iteration took 0.56s | loss: 10009.110551514354
+iteration took 0.58s | loss: 9068.364596591033
+iteration took 0.56s | loss: 9141.1117533693
+iteration took 0.55s | loss: 9556.348761108973
+iteration took 0.61s | loss: 10505.557429630651
+iteration took 0.54s | loss: 9729.014193972791
+iteration took 0.58s | loss: 9135.573091829678
+iteration took 0.59s | loss: 9034.735465514274
+iteration took 0.59s | loss: 9443.441909252424
+iteration took 0.56s | loss: 9684.838152646236
+iteration took 0.58s | loss: 8864.425377261074
+iteration took 0.59s | loss: 9200.015324331902
+iteration took 0.57s | loss: 8995.6320574224
+iteration took 0.57s | loss: 9752.647128936276
+iteration took 0.58s | loss: 9192.89742282365
+iteration took 0.6s | loss: 10325.82856232189
+iteration took 0.6s | loss: 9179.183393839981
+iteration took 0.57s | loss: 10111.466514931608
+iteration took 0.58s | loss: 9383.432021501498
+iteration took 0.59s | loss: 9849.311576751632
+iteration took 0.59s | loss: 10020.264306415655
+iteration took 0.57s | loss: 8753.356291742004
+iteration took 0.59s | loss: 9060.309552983603
+iteration took 0.61s | loss: 9957.835706970705
+iteration took 0.6s | loss: 9969.402119593837
+iteration took 0.6s | loss: 9308.572705364668
+iteration took 0.56s | loss: 8670.116580684988
+iteration took 0.58s | loss: 10428.90306515182
+iteration took 0.6s | loss: 9290.378134566381
+iteration took 0.58s | loss: 9597.816762571143
+iteration took 0.58s | loss: 10194.454425813154
+iteration took 0.59s | loss: 9061.212251453484
+iteration took 0.59s | loss: 9294.215572515372
+iteration took 0.59s | loss: 9099.872840554306
+iteration took 0.58s | loss: 9679.810952478556
+iteration took 0.59s | loss: 9750.12747586039
+iteration took 0.57s | loss: 8559.857837961821
+iteration took 0.59s | loss: 9834.478077913396
+iteration took 0.58s | loss: 8713.972023040835
+iteration took 0.57s | loss: 10198.404448440757
+iteration took 0.59s | loss: 9098.367348035395
+iteration took 0.58s | loss: 9451.775032284115
+iteration took 0.6s | loss: 8786.359136187148
+iteration took 0.61s | loss: 8858.38188860499
+iteration took 0.59s | loss: 8769.37174735146
+iteration took 0.59s | loss: 9830.168455008086
+iteration took 0.59s | loss: 8657.91589149326
+iteration took 0.6s | loss: 10089.177831701569
+iteration took 0.58s | loss: 9647.292493938228
+iteration took 0.59s | loss: 8906.872905532802
+iteration took 0.6s | loss: 8855.845440516898
+iteration took 0.57s | loss: 10030.631538889693
+iteration took 0.58s | loss: 9289.842881894676
+iteration took 0.58s | loss: 9983.544234839546
+iteration took 0.6s | loss: 9793.089610092773
+iteration took 0.58s | loss: 9201.06782687649
+iteration took 0.59s | loss: 10084.615318336651
+iteration took 0.58s | loss: 9206.247627924615
+iteration took 0.56s | loss: 9504.17308648304
+iteration took 0.6s | loss: 10482.264715174899
+iteration took 0.57s | loss: 9867.292607843885
+iteration took 0.56s | loss: 9518.489391816185
+iteration took 0.56s | loss: 9415.541929951303
+iteration took 0.59s | loss: 9444.312134463175
+iteration took 0.58s | loss: 9871.190882213854
+iteration took 0.57s | loss: 9938.843260750766
+iteration took 0.6s | loss: 11006.428650975344
+iteration took 0.59s | loss: 9850.689315235002
+iteration took 0.6s | loss: 8893.533694057596
+iteration took 0.59s | loss: 9493.874144698291
+iteration took 0.59s | loss: 10003.334210310424
+iteration took 0.59s | loss: 8794.525114032736
+iteration took 0.56s | loss: 8999.405155556897
+iteration took 0.6s | loss: 9693.93255318198
+iteration took 0.59s | loss: 9605.077554480957
+iteration took 0.58s | loss: 9889.534954127455
+iteration took 0.6s | loss: 9895.89092850317
+iteration took 0.57s | loss: 9161.466839469735
+iteration took 0.6s | loss: 9686.852018579291
+iteration took 0.6s | loss: 8881.000518168496
+iteration took 0.59s | loss: 9126.402836627823
+iteration took 0.58s | loss: 9698.416889380776
+iteration took 0.6s | loss: 9455.622596389423
+iteration took 0.57s | loss: 10155.627037196426
+iteration took 0.57s | loss: 9204.264426899364
+iteration took 0.61s | loss: 10047.30323665255
+iteration took 0.6s | loss: 10073.144047721225
+iteration took 0.58s | loss: 9549.192061707306
+iteration took 0.58s | loss: 9541.960734806957
+iteration took 0.59s | loss: 9276.972408138969
+iteration took 0.58s | loss: 9532.071474595998
+iteration took 0.6s | loss: 9296.193751767636
+iteration took 0.58s | loss: 9357.26975943601
+iteration took 0.56s | loss: 9075.701424274263
+iteration took 0.58s | loss: 9590.785188004023
+iteration took 0.61s | loss: 9831.933232678708
+iteration took 0.6s | loss: 9584.054151347918
+iteration took 0.59s | loss: 9412.667786259466
+iteration took 0.58s | loss: 10174.125197689638
+iteration took 0.56s | loss: 10536.334726883919
+iteration took 0.6s | loss: 9674.024274774554
+iteration took 0.6s | loss: 9440.55844873875
+iteration took 0.59s | loss: 8878.354718980465
+iteration took 0.57s | loss: 9898.957414347567
+iteration took 0.6s | loss: 9719.778022005485
+iteration took 0.59s | loss: 10410.263083463931
+iteration took 0.58s | loss: 10308.66133026695
+iteration took 0.63s | loss: 9797.101700924783
+iteration took 0.62s | loss: 9443.423225265806
+iteration took 0.59s | loss: 10347.88651175169
+iteration took 0.58s | loss: 9209.215040473404
+iteration took 0.58s | loss: 9559.631404648719
+iteration took 0.58s | loss: 10018.279706114494
+iteration took 0.58s | loss: 9991.304888722669
+iteration took 0.6s | loss: 9749.452116735381
+iteration took 0.61s | loss: 9152.88270103756
+iteration took 0.57s | loss: 9552.19335939834
+iteration took 0.61s | loss: 9427.807357722802
+iteration took 0.61s | loss: 9584.609215167513
+iteration took 0.6s | loss: 8994.963444250343
+iteration took 0.57s | loss: 9553.574592967036
+iteration took 0.58s | loss: 9779.456141917924
+iteration took 0.59s | loss: 9618.353049229157
+iteration took 0.57s | loss: 9196.6430913443
+iteration took 0.58s | loss: 9835.463598322562
+iteration took 0.62s | loss: 9878.828377858837
+iteration took 0.58s | loss: 9037.960989017482
+iteration took 0.57s | loss: 9440.960338609464
+iteration took 0.57s | loss: 9770.698106610656
+iteration took 0.59s | loss: 9772.39251513988
+iteration took 0.58s | loss: 10350.608861154353
+iteration took 0.58s | loss: 10219.597173153183
+iteration took 0.59s | loss: 9665.556019174
+iteration took 0.59s | loss: 9482.663938539052
+iteration took 0.59s | loss: 9788.204784715774
+iteration took 0.58s | loss: 9683.35780269213
+iteration took 0.58s | loss: 10543.445615191195
+iteration took 0.58s | loss: 9608.536341777039
+iteration took 0.58s | loss: 9921.691997362132
+iteration took 0.59s | loss: 9547.439055538804
+iteration took 0.58s | loss: 9365.712075269483
+iteration took 0.59s | loss: 10602.697621228364
+iteration took 0.59s | loss: 9419.238498739142
+iteration took 0.58s | loss: 9629.284753107248
+iteration took 0.6s | loss: 9890.855263020694
+iteration took 0.57s | loss: 9251.928191777628
+iteration took 0.59s | loss: 9935.819891998926
+iteration took 0.58s | loss: 9320.747085412642
+iteration took 0.58s | loss: 9963.743520239552
+iteration took 0.61s | loss: 9624.899860041372
+iteration took 0.58s | loss: 9685.727936664623
+iteration took 0.6s | loss: 10204.712461194833
+iteration took 0.58s | loss: 9600.535228044457
+iteration took 0.58s | loss: 9401.744670721244
+iteration took 0.59s | loss: 9863.623435438532
+iteration took 0.59s | loss: 9666.379977586355
+iteration took 0.6s | loss: 10256.169129697728
+iteration took 0.54s | loss: 10114.991932183926
+iteration took 0.6s | loss: 10167.884893450338
+iteration took 0.6s | loss: 9082.503872994435
+iteration took 0.57s | loss: 9278.5531226786
+iteration took 0.58s | loss: 8941.398626530477
+iteration took 0.58s | loss: 9640.308016416162
+iteration took 0.59s | loss: 9426.140134405172
+iteration took 0.58s | loss: 9127.525922598257
+iteration took 0.59s | loss: 9202.957699160572
+iteration took 0.57s | loss: 9716.486426455293
+iteration took 0.57s | loss: 9876.442216254101
+iteration took 0.56s | loss: 9859.008149965686
+iteration took 0.56s | loss: 9241.080627288919
+iteration took 0.59s | loss: 9435.64439097351
+iteration took 0.61s | loss: 9010.818801428964
+iteration took 0.61s | loss: 9351.821283323943
+iteration took 0.61s | loss: 10980.616867831124
+iteration took 0.58s | loss: 9166.6945487232
+iteration took 0.59s | loss: 9236.54923926678
+iteration took 0.58s | loss: 9391.843283980072
+iteration took 0.61s | loss: 8602.147859028904
+iteration took 0.67s | loss: 9921.012578072157
+iteration took 0.61s | loss: 10577.041444165376
+iteration took 0.6s | loss: 9750.751815273172
+iteration took 0.6s | loss: 9728.45706040108
+iteration took 0.59s | loss: 9976.503615570116
+iteration took 0.58s | loss: 10325.973632886922
+iteration took 0.58s | loss: 9999.379398654259
+iteration took 0.57s | loss: 10093.52225601109
+iteration took 0.59s | loss: 9552.253231682864
+iteration took 0.59s | loss: 9759.270967626944
+iteration took 0.59s | loss: 10613.439665298494
+iteration took 0.59s | loss: 9179.09383053177
+iteration took 0.61s | loss: 9024.200749793683
+iteration took 0.59s | loss: 9674.335984729536
+iteration took 0.6s | loss: 9644.455329979253
+iteration took 0.57s | loss: 9348.810703017272
+iteration took 0.59s | loss: 9518.104054031248
+iteration took 0.58s | loss: 9811.78280910265
+iteration took 0.58s | loss: 9239.70905541877
+iteration took 0.58s | loss: 9671.52644632051
+iteration took 0.59s | loss: 9560.93495314971
+iteration took 0.57s | loss: 9642.175191968978
+iteration took 0.6s | loss: 9553.36696855427
+iteration took 0.56s | loss: 9295.094951284966
+iteration took 0.61s | loss: 10009.473246665559
+iteration took 0.6s | loss: 9420.828773264477
+iteration took 0.61s | loss: 9798.3169635314
+iteration took 0.6s | loss: 9147.33697207069
+iteration took 0.57s | loss: 9280.770303492407
+iteration took 0.6s | loss: 8928.48422050471
+iteration took 0.58s | loss: 9924.467730182289
+iteration took 0.58s | loss: 9191.52639482932
+iteration took 0.59s | loss: 10240.769399356393
+iteration took 0.59s | loss: 9818.181302978433
+iteration took 0.57s | loss: 10186.81778597961
+iteration took 0.56s | loss: 10190.60324170128
+iteration took 0.59s | loss: 8529.298640698527
+iteration took 0.6s | loss: 10468.476333990322
+iteration took 0.6s | loss: 9144.558099323662
+iteration took 0.61s | loss: 9617.810104174154
+iteration took 0.59s | loss: 9691.38301041594
+iteration took 0.61s | loss: 9556.575524463275
+iteration took 0.6s | loss: 10369.867707034857
+iteration took 0.59s | loss: 8941.087425091
+iteration took 0.57s | loss: 9937.983799854197
+iteration took 0.56s | loss: 9540.662970685242
+iteration took 0.61s | loss: 9713.010517258599
+iteration took 0.6s | loss: 10021.581783575288
+iteration took 0.6s | loss: 10441.709789836645
+iteration took 0.56s | loss: 9313.31845474154
+iteration took 0.61s | loss: 10551.800897533638
+iteration took 0.6s | loss: 9139.15174735719
+iteration took 0.57s | loss: 9452.510686413418
+iteration took 0.58s | loss: 9084.243189809504
+iteration took 0.57s | loss: 9443.34231565127
+iteration took 0.56s | loss: 10225.917501796725
+iteration took 0.56s | loss: 10093.842749640684
+iteration took 0.56s | loss: 10024.242911620366
+iteration took 0.59s | loss: 10786.260246813556
+iteration took 0.57s | loss: 9858.948896491574
+iteration took 0.58s | loss: 9653.258809718545
+iteration took 0.58s | loss: 9756.964354911135
+iteration took 0.56s | loss: 9480.14349052144
+iteration took 0.58s | loss: 9058.93442894129
+iteration took 0.58s | loss: 9801.27527556429
+iteration took 0.59s | loss: 9516.62236849225
+iteration took 0.6s | loss: 10447.259425237608
+iteration took 0.57s | loss: 9668.426704961566
+iteration took 0.62s | loss: 9952.998396601077
+iteration took 0.59s | loss: 9396.594574741119
+iteration took 0.6s | loss: 9658.31506416622
+iteration took 0.59s | loss: 10402.02072434325
+iteration took 0.58s | loss: 10472.534183310108
+iteration took 0.58s | loss: 9597.682850728053
+iteration took 0.58s | loss: 9075.037955081845
+iteration took 0.58s | loss: 9872.498464489374
+iteration took 0.56s | loss: 9146.358134663298
+iteration took 0.59s | loss: 9580.989531063755
+iteration took 0.57s | loss: 9892.212549058408
+iteration took 0.56s | loss: 10084.959745616818
+iteration took 0.59s | loss: 10022.136735487546
+iteration took 0.55s | loss: 9721.283368875818
+iteration took 0.6s | loss: 9431.803398014952
+iteration took 0.54s | loss: 10138.282045550273
+iteration took 0.59s | loss: 9073.148591781877
+iteration took 0.57s | loss: 10008.712231817646
+iteration took 0.61s | loss: 9658.953346660533
+iteration took 0.71s | loss: 9428.484151350689
+iteration took 0.7s | loss: 9620.752018381301
+iteration took 0.62s | loss: 9354.779877840094
+iteration took 0.7s | loss: 9430.115502823544
+iteration took 0.65s | loss: 9524.308612589592
+iteration took 0.68s | loss: 8728.616188199478
+iteration took 0.6s | loss: 10928.680894244077
+iteration took 0.55s | loss: 9056.585306225177
+iteration took 0.59s | loss: 9575.431359734748
+iteration took 0.55s | loss: 10201.421320994816
+iteration took 0.59s | loss: 9670.987309462402
+iteration took 0.6s | loss: 10286.103375718167
+iteration took 0.58s | loss: 9119.74866376789
+iteration took 0.59s | loss: 9810.80844621738
+iteration took 0.57s | loss: 10453.547516984838
+iteration took 0.58s | loss: 9189.68253773771
+iteration took 0.61s | loss: 9218.927536742694
+iteration took 0.59s | loss: 9608.411126185649
+iteration took 0.6s | loss: 8789.579248035041
+iteration took 0.58s | loss: 10058.791877557167
+iteration took 0.58s | loss: 9677.966895825646
+iteration took 0.56s | loss: 9925.15033212617
+iteration took 0.59s | loss: 10096.63028527887
+iteration took 0.6s | loss: 10234.585133679191
+iteration took 0.59s | loss: 9875.094193100505
+iteration took 0.58s | loss: 10665.50062970355
+iteration took 0.58s | loss: 9846.916542935569
+iteration took 0.58s | loss: 8998.618033326778
+iteration took 0.58s | loss: 9558.899899883756
+iteration took 0.56s | loss: 10598.939230039467
+iteration took 0.57s | loss: 8897.169657149052
+iteration took 0.58s | loss: 9322.212829448219
+iteration took 0.62s | loss: 10001.315687867142
+iteration took 0.58s | loss: 9821.432919054474
+iteration took 0.58s | loss: 9806.774244139238
+iteration took 0.57s | loss: 10056.349196763393
+iteration took 0.59s | loss: 10332.485850912442
+iteration took 0.59s | loss: 9125.632412175266
+iteration took 0.59s | loss: 9498.315930144052
+iteration took 0.56s | loss: 9659.51316969479
+iteration took 0.6s | loss: 9855.813819424371
+iteration took 0.56s | loss: 10067.8099520272
+iteration took 0.64s | loss: 10047.309123545518
+iteration took 0.57s | loss: 9710.023855451856
+iteration took 0.58s | loss: 10073.688753220018
+iteration took 0.62s | loss: 9631.0176003569
+iteration took 0.6s | loss: 9300.265528712689
+iteration took 0.59s | loss: 9593.931465385878
+iteration took 0.62s | loss: 9455.15776978738
+iteration took 0.6s | loss: 9085.68963779338
+iteration took 0.57s | loss: 9273.694401372233
+iteration took 0.58s | loss: 9107.350306400265
+iteration took 0.58s | loss: 9520.696334145054
+</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">params</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_text output_subarea output_execute_result">
+<pre>     fun: 9251.928191777628
+     jac: array([-4.12768373e+10,  1.87392297e+09, -2.08654901e+10, -1.67833870e+10,
+        1.80450749e+10, -2.25005729e+10, -3.58411814e+10, -4.84502218e+09,
+       -1.80818066e+10,  2.14982734e+10,  1.20240321e+10,  1.55736186e+10,
+       -5.72650687e+10, -4.41084262e+10, -6.67344815e+10, -1.98314663e+10])
+ message: &#39;Desired error not necessarily achieved due to precision loss.&#39;
+    nfev: 461
+     nit: 1
+    njev: 25
+  status: 2
+ success: False
+       x: array([1.00000249, 1.00000143, 1.00000037, 1.00000698, 1.00000596,
+       1.00000011, 1.00000389, 1.00000426, 1.00001282, 1.00000522,
+       1.00000136, 1.0000012 , 0.99999975, 1.00000295, 1.0000024 ,
+       8.00000656])</pre>
+</div>
+
+</div>
+
+</div>
+</div>
 
 </div>
     {% endraw %}
 
 <div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<ul>
-<li>weighted NN based on (possibly batch) grad descent of feature weights</li>
-<li>find optimizer engine</li>
-<li>find fast KNN for query time</li>
-<li>Define metric specific sampling function (based on distance)) (possibly optimize func hyperparams during training, like $\alpha$ for $P_{sample} = Dist^{-\alpha}$ and others)</li>
-<li>Define cost function (possibly a product of entropy/variance divided by the KL div from percentiles dist and flat dirichlet (hypercube))</li>
-<li>Study cvxpy</li>
-<li>study metric learn</li>
-</ul>
-
+<h1 id="Weighted-KNN-DensityEstimator-PyTorch">Weighted KNN DensityEstimator PyTorch<a class="anchor-link" href="#Weighted-KNN-DensityEstimator-PyTorch"> </a></h1>
 </div>
 </div>
 </div>
@@ -343,14 +703,19 @@ nb_path: "notebooks\05_neighbors.ipynb"
 
 <div class="inner_cell">
     <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
+<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">pytorch_lightning</span> <span class="k">as</span> <span class="nn">pl</span>
+
+<span class="kn">from</span> <span class="nn">torch.utils.data</span> <span class="kn">import</span> <span class="n">TensorDataset</span><span class="p">,</span> <span class="n">DataLoader</span>
 <span class="kn">import</span> <span class="nn">torch</span>
 <span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">nn</span>
-<span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
-<span class="kn">from</span> <span class="nn">torchvision.datasets</span> <span class="kn">import</span> <span class="n">MNIST</span>
-<span class="kn">from</span> <span class="nn">torch.utils.data</span> <span class="kn">import</span> <span class="n">DataLoader</span><span class="p">,</span> <span class="n">random_split</span>
-<span class="kn">from</span> <span class="nn">torchvision</span> <span class="kn">import</span> <span class="n">transforms</span>
-<span class="kn">import</span> <span class="nn">pytorch_lightning</span> <span class="k">as</span> <span class="nn">pl</span>
+
+<span class="kn">from</span> <span class="nn">torch.autograd</span> <span class="kn">import</span> <span class="n">Variable</span> <span class="k">as</span> <span class="n">V</span>
+
+<span class="k">def</span> <span class="nf">update_tensor</span><span class="p">(</span><span class="n">tensor</span><span class="p">,</span> <span class="n">new_values</span><span class="p">):</span>    
+    <span class="k">try</span><span class="p">:</span> 
+        <span class="n">tensor</span> <span class="o">=</span>  <span class="n">tensor</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">fill_</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">new_values</span><span class="p">)</span>
+    <span class="k">except</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="n">tensor</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">new_values</span><span class="o">.</span><span class="n">shape</span><span class="p">);</span> <span class="k">raise</span>
+    <span class="k">return</span> <span class="n">tensor</span>
 </pre></div>
 
     </div>
@@ -367,181 +732,379 @@ nb_path: "notebooks\05_neighbors.ipynb"
 
 <div class="inner_cell">
     <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">LitAutoEncoder</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
-
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">WeightedKNNTorch</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">weighted_query_space</span><span class="p">(</span><span class="bp">self</span><span class="p">,):</span>
+        <span class="k">return</span> <span class="n">sparse_mul_row</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">raw_query_space</span><span class="p">,</span><span class="bp">self</span><span class="o">.</span><span class="n">weights</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">())</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s1">&#39;double&#39;</span><span class="p">)</span>
+    
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">n_neighbors</span><span class="p">,</span> <span class="n">n_samples</span><span class="p">,</span> <span class="n">layers</span> <span class="o">=</span> <span class="p">[],</span> <span class="n">batch_size</span> <span class="o">=</span> <span class="mi">256</span><span class="p">):</span>
         <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">))</span>
-
-    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
-        <span class="c1"># in lightning, forward defines the prediction/inference actions</span>
-        <span class="n">embedding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">embedding</span>
-
-    <span class="k">def</span> <span class="nf">training_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">):</span>
-        <span class="c1"># training_step defined the train loop. It is independent of forward</span>
-        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">batch</span>
-        <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-        <span class="n">z</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="n">x_hat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span><span class="p">(</span><span class="n">z</span><span class="p">)</span>
-        <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">mse_loss</span><span class="p">(</span><span class="n">x_hat</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s1">&#39;train_loss&#39;</span><span class="p">,</span> <span class="n">loss</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">loss</span>
-
-    <span class="k">def</span> <span class="nf">configure_optimizers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">optimizer</span>
-    
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-</div>
-    {% endraw %}
-
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">LitAutoEncoder</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
-    <span class="k">def</span> <span class="nf">training_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">,</span> <span class="n">optimizer_idx</span><span class="p">):</span>
-        <span class="c1"># access your optimizers with use_pl_optimizer=False. Default is True</span>
-        <span class="p">(</span><span class="n">opt_a</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span><span class="p">(</span><span class="n">use_pl_optimizer</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-
-        <span class="n">loss_a</span> <span class="o">=</span> <span class="o">...</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_a</span><span class="p">,</span> <span class="n">opt_a</span><span class="p">)</span>
-        <span class="n">opt_a</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-        <span class="n">opt_a</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
-
-        <span class="n">loss_b</span> <span class="o">=</span> <span class="o">...</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_b</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">,</span> <span class="n">retain_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">manual_backward</span><span class="p">(</span><span class="n">loss_b</span><span class="p">,</span> <span class="n">opt_b</span><span class="p">)</span>
-        <span class="n">opt_b</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-        <span class="n">opt_b</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-</div>
-    {% endraw %}
-
-</div>
- 
-
----
-
-title: Weighted KNN DensityEstimator
-
-
-keywords: fastai
-sidebar: home_sidebar
-
-
-
-nb_path: "notebooks\05_neighbors.ipynb"
----
-<!--
-
-#################################################
-### THIS FILE WAS AUTOGENERATED! DO NOT EDIT! ###
-#################################################
-# file to edit: notebooks\05_neighbors.ipynb
-# command to build the docs after a change: nbdev_build_docs
-
--->
-
-<div class="container" id="notebook-container">
+        <span class="bp">self</span><span class="o">.</span><span class="n">weights</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">X</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">weights</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">weights</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">raw_query_space</span> <span class="o">=</span> <span class="n">sparse</span><span class="o">.</span><span class="n">csr_matrix</span><span class="p">(</span><span class="n">X</span><span class="p">)</span><span class="c1">#X should be a sparse matrix</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">y_</span> <span class="o">=</span> <span class="n">y</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_neighbors</span> <span class="o">=</span> <span class="n">n_neighbors</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span> <span class="o">=</span> <span class="n">n_samples</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">samples_tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">n_samples</span><span class="p">,</span> <span class="n">y</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span>
         
-    {% raw %}
+    <span class="k">def</span> <span class="nf">_cos_sim_query</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">query_vector</span><span class="p">,</span><span class="n">query_space</span><span class="p">,</span> <span class="n">n_neighbors</span><span class="p">):</span>
+        <span class="n">idx</span><span class="p">,</span><span class="n">sim</span> <span class="o">=</span> <span class="n">cos_sim_query</span><span class="p">(</span><span class="n">query_vector</span><span class="p">,</span><span class="n">query_space</span><span class="p">,</span><span class="n">n_neighbors</span><span class="p">)</span>
+        <span class="c1">#drops the closest match which is the similarity of the row with itself</span>
+        <span class="c1">#maybe n_neighbors &gt; 1 deals with it</span>
+        <span class="c1">#idx, sim = idx[:,1:], sim[:,1:]</span>
+        <span class="k">return</span> <span class="n">idx</span><span class="p">,</span><span class="n">sim</span>
     
-<div class="cell border-box-sizing code_cell rendered">
-
-</div>
-    {% endraw %}
-
-<div class="cell border-box-sizing text_cell rendered"><div class="inner_cell">
-<div class="text_cell_render border-box-sizing rendered_html">
-<ul>
-<li>weighted NN based on (possibly batch) grad descent of feature weights</li>
-<li>find optimizer engine</li>
-<li>find fast KNN for query time</li>
-<li>Define metric specific sampling function (based on distance)) (possibly optimize func hyperparams during training, like $\alpha$ for $P_{sample} = Dist^{-\alpha}$ and others)</li>
-<li>Define cost function (possibly a product of entropy/variance divided by the KL div from percentiles dist and flat dirichlet (hypercube))</li>
-<li>Study cvxpy</li>
-<li>study metric learn</li>
-</ul>
-
-</div>
-</div>
-</div>
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
-<span class="kn">import</span> <span class="nn">torch</span>
-<span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">nn</span>
-<span class="kn">import</span> <span class="nn">torch.nn.functional</span> <span class="k">as</span> <span class="nn">F</span>
-<span class="kn">from</span> <span class="nn">torchvision.datasets</span> <span class="kn">import</span> <span class="n">MNIST</span>
-<span class="kn">from</span> <span class="nn">torch.utils.data</span> <span class="kn">import</span> <span class="n">DataLoader</span><span class="p">,</span> <span class="n">random_split</span>
-<span class="kn">from</span> <span class="nn">torchvision</span> <span class="kn">import</span> <span class="n">transforms</span>
-<span class="kn">import</span> <span class="nn">pytorch_lightning</span> <span class="k">as</span> <span class="nn">pl</span>
-</pre></div>
-
-    </div>
-</div>
-</div>
-
-</div>
-    {% endraw %}
-
-    {% raw %}
-    
-<div class="cell border-box-sizing code_cell rendered">
-<div class="input">
-
-<div class="inner_cell">
-    <div class="input_area">
-<div class=" highlight hl-ipython3"><pre><span></span><span class="k">class</span> <span class="nc">LitAutoEncoder</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">LightningModule</span><span class="p">):</span>
-
-    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">28</span> <span class="o">*</span> <span class="mi">28</span><span class="p">))</span>
-
+    <span class="k">def</span> <span class="nf">_sample_values</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">,</span> <span class="n">sim</span><span class="p">,</span> <span class="n">n_samples</span><span class="p">):</span>
+        <span class="n">sampled_idxs</span> <span class="o">=</span> <span class="n">sample_from_dist_array</span><span class="p">(</span><span class="n">arr</span> <span class="o">=</span> <span class="n">idx</span><span class="p">,</span> <span class="n">size</span> <span class="o">=</span> <span class="n">n_samples</span><span class="p">,</span> <span class="n">weights</span> <span class="o">=</span> <span class="n">sim</span><span class="p">)[:,:,</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>        
+        <span class="n">samples</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">take</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">y_</span><span class="p">,</span> <span class="n">indices</span> <span class="o">=</span> <span class="n">sampled_idxs</span><span class="p">,</span> <span class="n">axis</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">update_tensor</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">samples_tensor</span><span class="p">,</span> <span class="n">samples</span><span class="p">)</span>
+        
     <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
         <span class="c1"># in lightning, forward defines the prediction/inference actions</span>
-        <span class="n">embedding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">embedding</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">sparse_mul_row</span><span class="p">(</span>
+            <span class="n">x</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">weights</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s1">&#39;double&#39;</span><span class="p">)</span>
+        <span class="n">idx</span><span class="p">,</span> <span class="n">sim</span>  <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cos_sim_query</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="bp">self</span><span class="o">.</span><span class="n">weighted_query_space</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_neighbors</span><span class="p">)</span>
+        <span class="n">samples</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sample_values</span><span class="p">(</span><span class="n">idx</span><span class="p">,</span><span class="n">sim</span><span class="p">,</span><span class="bp">self</span><span class="o">.</span><span class="n">n_samples</span><span class="p">)</span>
+        <span class="n">update_tensor</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">samples_tensor</span><span class="p">,</span> <span class="n">samples</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">samples_tensor</span>
 
     <span class="k">def</span> <span class="nf">training_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">batch_idx</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">batch_idx</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">loss_tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">fill_</span><span class="p">(</span><span class="mi">1000</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">loss_tensor</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span>
         <span class="c1"># training_step defined the train loop. It is independent of forward</span>
-        <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">batch</span>
-        <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-        <span class="n">z</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
-        <span class="n">x_hat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">decoder</span><span class="p">(</span><span class="n">z</span><span class="p">)</span>
-        <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">mse_loss</span><span class="p">(</span><span class="n">x_hat</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s1">&#39;train_loss&#39;</span><span class="p">,</span> <span class="n">loss</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">loss</span>
+        <span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">batch</span>
+        <span class="n">samples</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>        
+        <span class="n">loss_tensor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss_tensor</span>
+        <span class="c1">#minimize uncertainty</span>
+        <span class="k">if</span> <span class="n">batch_idx</span><span class="o">%</span><span class="k">2</span> == 0:
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">bimodal_variance</span><span class="p">(</span><span class="n">samples</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">()])</span>
+            <span class="n">update_tensor</span><span class="p">(</span><span class="n">loss_tensor</span><span class="p">,</span><span class="n">loss</span><span class="p">)</span>
+            <span class="c1">#loss = -kde_entropy(quantile(y.numpy(),samples))            </span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1">#maximize entropy</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">bimodal_variance</span><span class="p">(</span><span class="n">samples</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">()])</span>
+            <span class="n">update_tensor</span><span class="p">(</span><span class="n">loss_tensor</span><span class="p">,</span><span class="n">loss</span><span class="p">)</span>
+            <span class="c1">#loss = -kde_entropy(quantile(y.numpy(),samples))        </span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s1">&#39;train_loss&#39;</span><span class="p">,</span> <span class="n">loss_tensor</span><span class="p">)</span>        
+        
+        <span class="k">return</span> <span class="n">loss_tensor</span>
 
-    <span class="k">def</span> <span class="nf">configure_optimizers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">configure_optimizers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>        
         <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">optimizer</span>
     
 </pre></div>
 
     </div>
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">model</span> <span class="o">=</span> <span class="n">WeightedKNNTorch</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span><span class="n">y_train</span><span class="p">,</span><span class="mi">50</span><span class="p">,</span><span class="mi">200</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">tensor_x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">X_train</span><span class="p">)</span> <span class="c1"># transform to torch tensor</span>
+<span class="n">tensor_y</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">y_train</span><span class="p">)</span>
+
+<span class="n">my_dataset</span> <span class="o">=</span> <span class="n">TensorDataset</span><span class="p">(</span><span class="n">tensor_x</span><span class="p">,</span><span class="n">tensor_y</span><span class="p">)</span> <span class="c1"># create your datset</span>
+<span class="n">my_dataloader</span> <span class="o">=</span> <span class="n">DataLoader</span><span class="p">(</span><span class="n">my_dataset</span><span class="p">,</span> <span class="n">batch_size</span> <span class="o">=</span> <span class="mi">256</span><span class="p">)</span> <span class="c1"># create your dataloader</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">trainer</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">Trainer</span><span class="p">(</span><span class="n">max_epochs</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+
+<span class="n">trainer</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">my_dataloader</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stderr output_text">
+<pre>GPU available: False, used: False
+TPU available: None, using: 0 TPU cores
+
+  | Name | Type | Params
+------------------------------
+------------------------------
+15        Trainable params
+0         Non-trainable params
+15        Total params
+</pre>
+</div>
+</div>
+
+<div class="output_area">
+
+<div class="output_subarea output_stream output_stdout output_text">
+<pre>torch.Size([256, 200, 2]) (64, 200, 2)
+
+</pre>
+</div>
+</div>
+
+<div class="output_area">
+
+<div class="output_subarea output_text output_error">
+<pre>
+<span class="ansi-red-intense-fg ansi-bold">---------------------------------------------------------------------------</span>
+<span class="ansi-red-intense-fg ansi-bold">RuntimeError</span>                              Traceback (most recent call last)
+<span class="ansi-green-intense-fg ansi-bold">&lt;ipython-input-192-643530954f4f&gt;</span> in <span class="ansi-cyan-fg">&lt;module&gt;</span>
+<span class="ansi-green-fg">      1</span> trainer <span class="ansi-yellow-intense-fg ansi-bold">=</span> pl<span class="ansi-yellow-intense-fg ansi-bold">.</span>Trainer<span class="ansi-yellow-intense-fg ansi-bold">(</span>max_epochs<span class="ansi-yellow-intense-fg ansi-bold">=</span><span class="ansi-cyan-intense-fg ansi-bold">10</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">      2</span> 
+<span class="ansi-green-intense-fg ansi-bold">----&gt; 3</span><span class="ansi-yellow-intense-fg ansi-bold"> </span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>fit<span class="ansi-yellow-intense-fg ansi-bold">(</span>model<span class="ansi-yellow-intense-fg ansi-bold">,</span> my_dataloader<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\trainer.py</span> in <span class="ansi-cyan-fg">fit</span><span class="ansi-blue-intense-fg ansi-bold">(self, model, train_dataloader, val_dataloaders, datamodule)</span>
+<span class="ansi-green-fg">    508</span>         self<span class="ansi-yellow-intense-fg ansi-bold">.</span>call_hook<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-blue-intense-fg ansi-bold">&#39;on_fit_start&#39;</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    509</span> 
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 510</span><span class="ansi-yellow-intense-fg ansi-bold">         </span>results <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>accelerator_backend<span class="ansi-yellow-intense-fg ansi-bold">.</span>train<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    511</span>         self<span class="ansi-yellow-intense-fg ansi-bold">.</span>accelerator_backend<span class="ansi-yellow-intense-fg ansi-bold">.</span>teardown<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    512</span> 
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\accelerators\accelerator.py</span> in <span class="ansi-cyan-fg">train</span><span class="ansi-blue-intense-fg ansi-bold">(self)</span>
+<span class="ansi-green-fg">     55</span>     <span class="ansi-green-intense-fg ansi-bold">def</span> train<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">     56</span>         self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>setup_trainer<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>model<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 57</span><span class="ansi-yellow-intense-fg ansi-bold">         </span><span class="ansi-green-intense-fg ansi-bold">return</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>train_or_test<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     58</span> 
+<span class="ansi-green-fg">     59</span>     <span class="ansi-green-intense-fg ansi-bold">def</span> teardown<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\accelerators\accelerator.py</span> in <span class="ansi-cyan-fg">train_or_test</span><span class="ansi-blue-intense-fg ansi-bold">(self)</span>
+<span class="ansi-green-fg">     72</span>         <span class="ansi-green-intense-fg ansi-bold">else</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">     73</span>             self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>train_loop<span class="ansi-yellow-intense-fg ansi-bold">.</span>setup_training<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 74</span><span class="ansi-yellow-intense-fg ansi-bold">             </span>results <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>train<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     75</span>         <span class="ansi-green-intense-fg ansi-bold">return</span> results
+<span class="ansi-green-fg">     76</span> 
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\trainer.py</span> in <span class="ansi-cyan-fg">train</span><span class="ansi-blue-intense-fg ansi-bold">(self)</span>
+<span class="ansi-green-fg">    559</span>                 <span class="ansi-green-intense-fg ansi-bold">with</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>profiler<span class="ansi-yellow-intense-fg ansi-bold">.</span>profile<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-blue-intense-fg ansi-bold">&#34;run_training_epoch&#34;</span><span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">    560</span>                     <span class="ansi-red-intense-fg ansi-bold"># run train epoch</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 561</span><span class="ansi-yellow-intense-fg ansi-bold">                     </span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>train_loop<span class="ansi-yellow-intense-fg ansi-bold">.</span>run_training_epoch<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    562</span> 
+<span class="ansi-green-fg">    563</span>                 <span class="ansi-green-intense-fg ansi-bold">if</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>max_steps <span class="ansi-green-intense-fg ansi-bold">and</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>max_steps <span class="ansi-yellow-intense-fg ansi-bold">&lt;=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>global_step<span class="ansi-yellow-intense-fg ansi-bold">:</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\training_loop.py</span> in <span class="ansi-cyan-fg">run_training_epoch</span><span class="ansi-blue-intense-fg ansi-bold">(self)</span>
+<span class="ansi-green-fg">    547</span>             <span class="ansi-red-intense-fg ansi-bold"># ------------------------------------</span>
+<span class="ansi-green-fg">    548</span>             <span class="ansi-green-intense-fg ansi-bold">with</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>profiler<span class="ansi-yellow-intense-fg ansi-bold">.</span>profile<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-blue-intense-fg ansi-bold">&#34;run_training_batch&#34;</span><span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 549</span><span class="ansi-yellow-intense-fg ansi-bold">                 </span>batch_output <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>run_training_batch<span class="ansi-yellow-intense-fg ansi-bold">(</span>batch<span class="ansi-yellow-intense-fg ansi-bold">,</span> batch_idx<span class="ansi-yellow-intense-fg ansi-bold">,</span> dataloader_idx<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    550</span> 
+<span class="ansi-green-fg">    551</span>             <span class="ansi-red-intense-fg ansi-bold"># when returning -1 from train_step, we end epoch early</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\training_loop.py</span> in <span class="ansi-cyan-fg">run_training_batch</span><span class="ansi-blue-intense-fg ansi-bold">(self, batch, batch_idx, dataloader_idx)</span>
+<span class="ansi-green-fg">    702</span> 
+<span class="ansi-green-fg">    703</span>                         <span class="ansi-red-intense-fg ansi-bold"># optimizer step</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 704</span><span class="ansi-yellow-intense-fg ansi-bold">                         </span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>optimizer_step<span class="ansi-yellow-intense-fg ansi-bold">(</span>optimizer<span class="ansi-yellow-intense-fg ansi-bold">,</span> opt_idx<span class="ansi-yellow-intense-fg ansi-bold">,</span> batch_idx<span class="ansi-yellow-intense-fg ansi-bold">,</span> train_step_and_backward_closure<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    705</span> 
+<span class="ansi-green-fg">    706</span>                     <span class="ansi-green-intense-fg ansi-bold">else</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\training_loop.py</span> in <span class="ansi-cyan-fg">optimizer_step</span><span class="ansi-blue-intense-fg ansi-bold">(self, optimizer, opt_idx, batch_idx, train_step_and_backward_closure)</span>
+<span class="ansi-green-fg">    488</span>             on_tpu<span class="ansi-yellow-intense-fg ansi-bold">=</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>use_tpu <span class="ansi-green-intense-fg ansi-bold">and</span> TPU_AVAILABLE<span class="ansi-yellow-intense-fg ansi-bold">,</span>
+<span class="ansi-green-fg">    489</span>             using_native_amp<span class="ansi-yellow-intense-fg ansi-bold">=</span>using_native_amp<span class="ansi-yellow-intense-fg ansi-bold">,</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 490</span><span class="ansi-yellow-intense-fg ansi-bold">             </span>using_lbfgs<span class="ansi-yellow-intense-fg ansi-bold">=</span>is_lbfgs<span class="ansi-yellow-intense-fg ansi-bold">,</span>
+<span class="ansi-green-fg">    491</span>         )
+<span class="ansi-green-fg">    492</span> 
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\core\lightning.py</span> in <span class="ansi-cyan-fg">optimizer_step</span><span class="ansi-blue-intense-fg ansi-bold">(self, epoch, batch_idx, optimizer, optimizer_idx, optimizer_closure, on_tpu, using_native_amp, using_lbfgs)</span>
+<span class="ansi-green-fg">   1294</span> 
+<span class="ansi-green-fg">   1295</span>         &#34;&#34;&#34;
+<span class="ansi-green-intense-fg ansi-bold">-&gt; 1296</span><span class="ansi-yellow-intense-fg ansi-bold">         </span>optimizer<span class="ansi-yellow-intense-fg ansi-bold">.</span>step<span class="ansi-yellow-intense-fg ansi-bold">(</span>closure<span class="ansi-yellow-intense-fg ansi-bold">=</span>optimizer_closure<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">   1297</span> 
+<span class="ansi-green-fg">   1298</span>     def optimizer_zero_grad(
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\core\optimizer.py</span> in <span class="ansi-cyan-fg">step</span><span class="ansi-blue-intense-fg ansi-bold">(self, closure, make_optimizer_step, *args, **kwargs)</span>
+<span class="ansi-green-fg">    284</span> 
+<span class="ansi-green-fg">    285</span>         <span class="ansi-green-intense-fg ansi-bold">if</span> make_optimizer_step<span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 286</span><span class="ansi-yellow-intense-fg ansi-bold">             </span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>__optimizer_step<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">*</span>args<span class="ansi-yellow-intense-fg ansi-bold">,</span> closure<span class="ansi-yellow-intense-fg ansi-bold">=</span>closure<span class="ansi-yellow-intense-fg ansi-bold">,</span> profiler_name<span class="ansi-yellow-intense-fg ansi-bold">=</span>profiler_name<span class="ansi-yellow-intense-fg ansi-bold">,</span> <span class="ansi-yellow-intense-fg ansi-bold">**</span>kwargs<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    287</span>         <span class="ansi-green-intense-fg ansi-bold">else</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">    288</span>             <span class="ansi-red-intense-fg ansi-bold"># make sure to call optimizer_closure when accumulating</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\core\optimizer.py</span> in <span class="ansi-cyan-fg">__optimizer_step</span><span class="ansi-blue-intense-fg ansi-bold">(self, closure, profiler_name, *args, **kwargs)</span>
+<span class="ansi-green-fg">    142</span>         <span class="ansi-green-intense-fg ansi-bold">else</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">    143</span>             <span class="ansi-green-intense-fg ansi-bold">with</span> trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>profiler<span class="ansi-yellow-intense-fg ansi-bold">.</span>profile<span class="ansi-yellow-intense-fg ansi-bold">(</span>profiler_name<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 144</span><span class="ansi-yellow-intense-fg ansi-bold">                 </span>optimizer<span class="ansi-yellow-intense-fg ansi-bold">.</span>step<span class="ansi-yellow-intense-fg ansi-bold">(</span>closure<span class="ansi-yellow-intense-fg ansi-bold">=</span>closure<span class="ansi-yellow-intense-fg ansi-bold">,</span> <span class="ansi-yellow-intense-fg ansi-bold">*</span>args<span class="ansi-yellow-intense-fg ansi-bold">,</span> <span class="ansi-yellow-intense-fg ansi-bold">**</span>kwargs<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    145</span> 
+<span class="ansi-green-fg">    146</span>         accelerator_backend <span class="ansi-yellow-intense-fg ansi-bold">=</span> trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>accelerator_backend
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\torch\autograd\grad_mode.py</span> in <span class="ansi-cyan-fg">decorate_context</span><span class="ansi-blue-intense-fg ansi-bold">(*args, **kwargs)</span>
+<span class="ansi-green-fg">     13</span>         <span class="ansi-green-intense-fg ansi-bold">def</span> decorate_context<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">*</span>args<span class="ansi-yellow-intense-fg ansi-bold">,</span> <span class="ansi-yellow-intense-fg ansi-bold">**</span>kwargs<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">     14</span>             <span class="ansi-green-intense-fg ansi-bold">with</span> self<span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 15</span><span class="ansi-yellow-intense-fg ansi-bold">                 </span><span class="ansi-green-intense-fg ansi-bold">return</span> func<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">*</span>args<span class="ansi-yellow-intense-fg ansi-bold">,</span> <span class="ansi-yellow-intense-fg ansi-bold">**</span>kwargs<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     16</span>         <span class="ansi-green-intense-fg ansi-bold">return</span> decorate_context
+<span class="ansi-green-fg">     17</span> 
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\torch\optim\adam.py</span> in <span class="ansi-cyan-fg">step</span><span class="ansi-blue-intense-fg ansi-bold">(self, closure)</span>
+<span class="ansi-green-fg">     60</span>         <span class="ansi-green-intense-fg ansi-bold">if</span> closure <span class="ansi-green-intense-fg ansi-bold">is</span> <span class="ansi-green-intense-fg ansi-bold">not</span> <span class="ansi-green-intense-fg ansi-bold">None</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">     61</span>             <span class="ansi-green-intense-fg ansi-bold">with</span> torch<span class="ansi-yellow-intense-fg ansi-bold">.</span>enable_grad<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 62</span><span class="ansi-yellow-intense-fg ansi-bold">                 </span>loss <span class="ansi-yellow-intense-fg ansi-bold">=</span> closure<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     63</span> 
+<span class="ansi-green-fg">     64</span>         <span class="ansi-green-intense-fg ansi-bold">for</span> group <span class="ansi-green-intense-fg ansi-bold">in</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>param_groups<span class="ansi-yellow-intense-fg ansi-bold">:</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\training_loop.py</span> in <span class="ansi-cyan-fg">train_step_and_backward_closure</span><span class="ansi-blue-intense-fg ansi-bold">()</span>
+<span class="ansi-green-fg">    697</span>                                 opt_idx<span class="ansi-yellow-intense-fg ansi-bold">,</span>
+<span class="ansi-green-fg">    698</span>                                 optimizer<span class="ansi-yellow-intense-fg ansi-bold">,</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 699</span><span class="ansi-yellow-intense-fg ansi-bold">                                 </span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>hiddens
+<span class="ansi-green-fg">    700</span>                             )
+<span class="ansi-green-fg">    701</span>                             <span class="ansi-green-intense-fg ansi-bold">return</span> <span class="ansi-green-intense-fg ansi-bold">None</span> <span class="ansi-green-intense-fg ansi-bold">if</span> result <span class="ansi-green-intense-fg ansi-bold">is</span> <span class="ansi-green-intense-fg ansi-bold">None</span> <span class="ansi-green-intense-fg ansi-bold">else</span> result<span class="ansi-yellow-intense-fg ansi-bold">.</span>loss
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\training_loop.py</span> in <span class="ansi-cyan-fg">training_step_and_backward</span><span class="ansi-blue-intense-fg ansi-bold">(self, split_batch, batch_idx, opt_idx, optimizer, hiddens)</span>
+<span class="ansi-green-fg">    790</span>         <span class="ansi-green-intense-fg ansi-bold">with</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>profiler<span class="ansi-yellow-intense-fg ansi-bold">.</span>profile<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-blue-intense-fg ansi-bold">&#34;training_step_and_backward&#34;</span><span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">    791</span>             <span class="ansi-red-intense-fg ansi-bold"># lightning module hook</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 792</span><span class="ansi-yellow-intense-fg ansi-bold">             </span>result <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>training_step<span class="ansi-yellow-intense-fg ansi-bold">(</span>split_batch<span class="ansi-yellow-intense-fg ansi-bold">,</span> batch_idx<span class="ansi-yellow-intense-fg ansi-bold">,</span> opt_idx<span class="ansi-yellow-intense-fg ansi-bold">,</span> hiddens<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    793</span>             self<span class="ansi-yellow-intense-fg ansi-bold">.</span>_curr_step_result <span class="ansi-yellow-intense-fg ansi-bold">=</span> result
+<span class="ansi-green-fg">    794</span> 
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\trainer\training_loop.py</span> in <span class="ansi-cyan-fg">training_step</span><span class="ansi-blue-intense-fg ansi-bold">(self, split_batch, batch_idx, opt_idx, hiddens)</span>
+<span class="ansi-green-fg">    314</span>             model_ref<span class="ansi-yellow-intense-fg ansi-bold">.</span>_current_fx_name <span class="ansi-yellow-intense-fg ansi-bold">=</span> <span class="ansi-blue-intense-fg ansi-bold">&#39;training_step&#39;</span>
+<span class="ansi-green-fg">    315</span>             model_ref<span class="ansi-yellow-intense-fg ansi-bold">.</span>_results <span class="ansi-yellow-intense-fg ansi-bold">=</span> Result<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-intense-fg ansi-bold">--&gt; 316</span><span class="ansi-yellow-intense-fg ansi-bold">             </span>training_step_output <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>accelerator_backend<span class="ansi-yellow-intense-fg ansi-bold">.</span>training_step<span class="ansi-yellow-intense-fg ansi-bold">(</span>args<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    317</span>             self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>logger_connector<span class="ansi-yellow-intense-fg ansi-bold">.</span>cache_logged_metrics<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">    318</span> 
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\accelerators\cpu_accelerator.py</span> in <span class="ansi-cyan-fg">training_step</span><span class="ansi-blue-intense-fg ansi-bold">(self, args)</span>
+<span class="ansi-green-fg">     60</span> 
+<span class="ansi-green-fg">     61</span>     <span class="ansi-green-intense-fg ansi-bold">def</span> training_step<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">,</span> args<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 62</span><span class="ansi-yellow-intense-fg ansi-bold">         </span><span class="ansi-green-intense-fg ansi-bold">return</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>_step<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>trainer<span class="ansi-yellow-intense-fg ansi-bold">.</span>model<span class="ansi-yellow-intense-fg ansi-bold">.</span>training_step<span class="ansi-yellow-intense-fg ansi-bold">,</span> args<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     63</span> 
+<span class="ansi-green-fg">     64</span>     <span class="ansi-green-intense-fg ansi-bold">def</span> validation_step<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">,</span> args<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+
+<span class="ansi-green-intense-fg ansi-bold">C:\Anaconda3\lib\site-packages\pytorch_lightning\accelerators\cpu_accelerator.py</span> in <span class="ansi-cyan-fg">_step</span><span class="ansi-blue-intense-fg ansi-bold">(self, model_step, args)</span>
+<span class="ansi-green-fg">     56</span>                 output <span class="ansi-yellow-intense-fg ansi-bold">=</span> model_step<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">*</span>args<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     57</span>         <span class="ansi-green-intense-fg ansi-bold">else</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 58</span><span class="ansi-yellow-intense-fg ansi-bold">             </span>output <span class="ansi-yellow-intense-fg ansi-bold">=</span> model_step<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-yellow-intense-fg ansi-bold">*</span>args<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     59</span>         <span class="ansi-green-intense-fg ansi-bold">return</span> output
+<span class="ansi-green-fg">     60</span> 
+
+<span class="ansi-green-intense-fg ansi-bold">&lt;ipython-input-189-b16584e398b7&gt;</span> in <span class="ansi-cyan-fg">training_step</span><span class="ansi-blue-intense-fg ansi-bold">(self, batch, batch_idx)</span>
+<span class="ansi-green-fg">     43</span>         <span class="ansi-red-intense-fg ansi-bold"># training_step defined the train loop. It is independent of forward</span>
+<span class="ansi-green-fg">     44</span>         X<span class="ansi-yellow-intense-fg ansi-bold">,</span> y <span class="ansi-yellow-intense-fg ansi-bold">=</span> batch
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 45</span><span class="ansi-yellow-intense-fg ansi-bold">         </span>samples <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>forward<span class="ansi-yellow-intense-fg ansi-bold">(</span>X<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     46</span>         loss_tensor <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>loss_tensor
+<span class="ansi-green-fg">     47</span>         <span class="ansi-red-intense-fg ansi-bold">#minimize uncertainty</span>
+
+<span class="ansi-green-intense-fg ansi-bold">&lt;ipython-input-189-b16584e398b7&gt;</span> in <span class="ansi-cyan-fg">forward</span><span class="ansi-blue-intense-fg ansi-bold">(self, x)</span>
+<span class="ansi-green-fg">     33</span>         ).astype(&#39;double&#39;)
+<span class="ansi-green-fg">     34</span>         idx<span class="ansi-yellow-intense-fg ansi-bold">,</span> sim  <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>_cos_sim_query<span class="ansi-yellow-intense-fg ansi-bold">(</span>x<span class="ansi-yellow-intense-fg ansi-bold">,</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>weighted_query_space<span class="ansi-yellow-intense-fg ansi-bold">,</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>n_neighbors<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 35</span><span class="ansi-yellow-intense-fg ansi-bold">         </span>samples <span class="ansi-yellow-intense-fg ansi-bold">=</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>_sample_values<span class="ansi-yellow-intense-fg ansi-bold">(</span>idx<span class="ansi-yellow-intense-fg ansi-bold">,</span>sim<span class="ansi-yellow-intense-fg ansi-bold">,</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>n_samples<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     36</span>         update_tensor<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>samples_tensor<span class="ansi-yellow-intense-fg ansi-bold">,</span> samples<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     37</span>         <span class="ansi-green-intense-fg ansi-bold">return</span> self<span class="ansi-yellow-intense-fg ansi-bold">.</span>samples_tensor
+
+<span class="ansi-green-intense-fg ansi-bold">&lt;ipython-input-189-b16584e398b7&gt;</span> in <span class="ansi-cyan-fg">_sample_values</span><span class="ansi-blue-intense-fg ansi-bold">(self, idx, sim, n_samples)</span>
+<span class="ansi-green-fg">     24</span>         sampled_idxs <span class="ansi-yellow-intense-fg ansi-bold">=</span> sample_from_dist_array<span class="ansi-yellow-intense-fg ansi-bold">(</span>arr <span class="ansi-yellow-intense-fg ansi-bold">=</span> idx<span class="ansi-yellow-intense-fg ansi-bold">,</span> size <span class="ansi-yellow-intense-fg ansi-bold">=</span> n_samples<span class="ansi-yellow-intense-fg ansi-bold">,</span> weights <span class="ansi-yellow-intense-fg ansi-bold">=</span> sim<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">[</span><span class="ansi-yellow-intense-fg ansi-bold">:</span><span class="ansi-yellow-intense-fg ansi-bold">,</span><span class="ansi-yellow-intense-fg ansi-bold">:</span><span class="ansi-yellow-intense-fg ansi-bold">,</span><span class="ansi-yellow-intense-fg ansi-bold">-</span><span class="ansi-cyan-intense-fg ansi-bold">1</span><span class="ansi-yellow-intense-fg ansi-bold">]</span>
+<span class="ansi-green-fg">     25</span>         samples <span class="ansi-yellow-intense-fg ansi-bold">=</span> np<span class="ansi-yellow-intense-fg ansi-bold">.</span>take<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>y_<span class="ansi-yellow-intense-fg ansi-bold">,</span> indices <span class="ansi-yellow-intense-fg ansi-bold">=</span> sampled_idxs<span class="ansi-yellow-intense-fg ansi-bold">,</span> axis <span class="ansi-yellow-intense-fg ansi-bold">=</span> <span class="ansi-cyan-intense-fg ansi-bold">0</span><span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 26</span><span class="ansi-yellow-intense-fg ansi-bold">         </span><span class="ansi-green-intense-fg ansi-bold">return</span> update_tensor<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">.</span>samples_tensor<span class="ansi-yellow-intense-fg ansi-bold">,</span> samples<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     27</span> 
+<span class="ansi-green-fg">     28</span>     <span class="ansi-green-intense-fg ansi-bold">def</span> forward<span class="ansi-yellow-intense-fg ansi-bold">(</span>self<span class="ansi-yellow-intense-fg ansi-bold">,</span> x<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+
+<span class="ansi-green-intense-fg ansi-bold">&lt;ipython-input-163-917e27e9b345&gt;</span> in <span class="ansi-cyan-fg">update_tensor</span><span class="ansi-blue-intense-fg ansi-bold">(tensor, new_values)</span>
+<span class="ansi-green-fg">      9</span> <span class="ansi-green-intense-fg ansi-bold">def</span> update_tensor<span class="ansi-yellow-intense-fg ansi-bold">(</span>tensor<span class="ansi-yellow-intense-fg ansi-bold">,</span> new_values<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-fg">     10</span>     <span class="ansi-green-intense-fg ansi-bold">try</span><span class="ansi-yellow-intense-fg ansi-bold">:</span>
+<span class="ansi-green-intense-fg ansi-bold">---&gt; 11</span><span class="ansi-yellow-intense-fg ansi-bold">         </span>tensor <span class="ansi-yellow-intense-fg ansi-bold">=</span>  tensor<span class="ansi-yellow-intense-fg ansi-bold">.</span>data<span class="ansi-yellow-intense-fg ansi-bold">.</span>fill_<span class="ansi-yellow-intense-fg ansi-bold">(</span><span class="ansi-cyan-intense-fg ansi-bold">1</span><span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">*</span>torch<span class="ansi-yellow-intense-fg ansi-bold">.</span>Tensor<span class="ansi-yellow-intense-fg ansi-bold">(</span>new_values<span class="ansi-yellow-intense-fg ansi-bold">)</span>
+<span class="ansi-green-fg">     12</span>     <span class="ansi-green-intense-fg ansi-bold">except</span><span class="ansi-yellow-intense-fg ansi-bold">:</span> print<span class="ansi-yellow-intense-fg ansi-bold">(</span>tensor<span class="ansi-yellow-intense-fg ansi-bold">.</span>shape<span class="ansi-yellow-intense-fg ansi-bold">,</span> new_values<span class="ansi-yellow-intense-fg ansi-bold">.</span>shape<span class="ansi-yellow-intense-fg ansi-bold">)</span><span class="ansi-yellow-intense-fg ansi-bold">;</span> <span class="ansi-green-intense-fg ansi-bold">raise</span>
+<span class="ansi-green-fg">     13</span>     <span class="ansi-green-intense-fg ansi-bold">return</span> tensor
+
+<span class="ansi-red-intense-fg ansi-bold">RuntimeError</span>: The size of tensor a (256) must match the size of tensor b (64) at non-singleton dimension 0</pre>
+</div>
+</div>
+
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="n">i</span> <span class="o">+=</span> <span class="mi">45</span>
+<span class="n">sample</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">X_test</span><span class="p">[</span><span class="n">i</span><span class="p">]))</span>
+<span class="n">true_value</span> <span class="o">=</span> <span class="n">y_test</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+</div>
+    {% endraw %}
+
+    {% raw %}
+    
+<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+
+<div class="inner_cell">
+    <div class="input_area">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">seaborn</span> <span class="k">as</span> <span class="nn">sns</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="n">make_distplot</span><span class="p">(</span><span class="n">sample</span><span class="p">,</span><span class="n">true_value</span> <span class="p">,</span><span class="n">y_test</span><span class="p">)</span>
+</pre></div>
+
+    </div>
+</div>
+</div>
+
+<div class="output_wrapper">
+<div class="output">
+
+<div class="output_area">
+
+
+
+<div class="output_png output_subarea ">
+<img src="data:image/png;base64,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3OycO1arLd/SuGbG+Nj3f8NINlYwRrKCj33/N7t87zPPPJMbb7yR0dFR7rnnHo455pjqtcsuu4zDDz+ce+65h3/+53/mLW95CwAf/vCHOf744/nlL3/Ja1/7Wv70pz8B8MADD/CVr3yFn//856xdu5Y4jrn++usnfO8VK1awzz77cNBBB/G2t72N//iP/6hee/3rX88dd9zB3XffzQtf+EL+7d/+rXrtySef5Cc/+Qmf/OQnec1rXsOFF17Ifffdx69+9SvWrl0LwNatWzniiCO46667eOlLX8qHP/zhMe+dZRn/8A//wE033cSdd97Jueeey6WXXgrAlVdeyS9/+UvuuecePve5z+3iv7BhzBHeQ5nLo3NjnxvzjmlJXTrnbgBOAJ7pnFsHXAZcCXzVOfd24E/AGQDe+/ucc18F7gdy4O+990Fp3o1UcA4C39WvGWX9ppEpHZ8Ky5cv56GHHuKGG27gla985ZjXfvazn/G1r30NgJe97GVs3LiRp556ittuu42vf/3rALzqVa9izz2lK+PHP/4xd955J0cddRQAIyMjPOtZz2Ii4jjme9/7HnfccQc//vGPufDCC7nzzju5/PLLuffee/ngBz/Ipk2b2LJlC6ecUnV48JrXvAbnHIcddhj77LMPhx12GACHHHIIDz30ECtXriSKIt74xjcC8KY3vYnXv/71Y977N7/5Dffeey8nnXQSAEVRsO+++1b/Jueccw6nnXYap51mtUbGAsWXgBORAxU7PV4VkRvzhWkROu/9WRO89PIJzr8CuGKc42uAQ6djTZPl2XsM8vA4ovbsPQan5f6vfe1red/73sctt9zCxo0bq+N+nL/8Qln8eOXx3nve+ta38tGPfnTS7+2c4+ijj+boo4/mpJNO4m1vexuXX345q1ev5uabb2bFihVcd9113HLLLdU17XYbgCiKqu/D8zzPJ3yf3rUecsgh3H777duc+53vfIfbbruNb33rW3zkIx/hvvvuI0n60rfA6GdCJNckRHbGvGO397p8/ykvYDAd+xfYYBrz/lNeMC33P/fcc/nQhz5URUaBl7zkJVXq8ZZbbuGZz3wmS5cuHXP8u9/9Lk8++SQAL3/5y7npppt47DHZ6nziiSf44x//OOH7rl+/nrvuuqt6vnbtWp7znOcAsHnzZvbdd1+yLNtu+nMiyrKsqiu//OUvc/zxx495/QUveAEbNmyohC7LMu677z7KsuTPf/4zJ554Iv/yL/9SRZSGseAYT9TGEz9jXrDb/ykdqiunu+oysP/++3PBBRdsc/zyyy/nbW97G8uXL2doaIgvflFaDi+77DLOOussjjjiCF760pdywAEHAHDwwQfzT//0T5x88smUZUmapnzmM5+pxKuXLMt43/vex/r16xkYGGDvvfeu9sQ+8pGPcMwxx/Cc5zyHww47jM2bN0/pZ1q0aBH33XcfRx55JMuWLeMrX/nKmNdbrRY33XQT73nPe3jqqafI85x//Md/5K//+q9505vexFNPPYX3ngsvvJA99thjSu9tGPMCF4HPtV48iJ63tOU8xY2XQltIrFq1yq9Zs2bMsQceeIAXvvCFc7Si/mfx4sXzPhKz3wFjxvFe9uRCJOeiuYroJv2m431e9hET/jvs9hGdYRjGTuGcRXALhN1+j86YOvM9mjMMw2hiQmcYhmH0NZa6NAzDmCvmzz5fX2MRnWEYxlxg7iqzhkV0hmEY4zHT0Za5q8waFtHNABs3bmTlypWsXLmSv/iLv2C//farnne73Wl9r02bNvHZz352wtfjOGblypUccsghrFixgk984hOUZQnAmjVreM973jPhtQ899BBf/vKXJ3x9/fr1nH766QBcd911nH/++VNa+3XXXcf69bVv9zve8Q7uv//+Kd3DMKYd78WoORuVx3BsuqMtc1eZNSyig2n/y22vvfaqDJAvv/xyFi9ezPve974dXpfn+ZTtsILQ/d3f/d24rw8ODlZreeyxxzj77LN56qmn+PCHP8yqVatYtWrVhPcOQnf22WePu9ZnP/vZuzR/7rrrruPQQw/l2c9+NgBf+MIXdvpehjEtBEErS/kcAHkeJYCb3mgriFrzs8bcVWYEi+hmKU++vdE4F110ESeeeCIXX3wxv/vd7zj22GM56qij+NCHPlSN2QH42Mc+xlFHHcXy5cu57LLLALjkkkv43e9+x8qVK3n/+9+/3TU861nP4pprruHTn/403ntuueWWahDsrbfeWkWdhx9+OJs3b+aSSy7hpz/9KStXruSTn/wk1113HWeccQavec1rOPnkk3nooYc49NDamvTPf/4zp556Ki94wQuqiQa951x11VVcfvnl3HTTTaxZs4ZzzjmHlStXMjIywgknnEBoZr3hhhs47LDDOPTQQ7n4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eiv33HPPpH+WCy64gAsvvJA77riDr33ta7zjHe/YxX8dwxiH8VKCTSELLiahhD88bwpZr0CFMTxRpClQTW2GdGXckuvjWES0WfE5W5PHjWnH2gv+9KepHd9J7r33Xj74wQ+yadMmtmzZwimnnFK91jumJ8xeO/vss6vJ5M0xPQBbtmzht7/9LQcccMB23zekL1/3utdx4403Vk4rX/3qV7nmmmvI85xHHnmE+++/n+XLl0/qZ/nRj37E/fffXz1/+umn2bx5M0uWLJnkv4ZhTJIgbk0q0VMhDPt0vQ3ZTWcSgLwrkV/cYsy+nfPgI2knIDzGtRjGTo4XWV3dSS7dCpEK43ROHjemHRO6Aw6QdOV4x6eR1atXc/PNN7NixQquu+46brnlluq1qYzpeec73znm+I7msZ122mlcdNFF3HXXXYyMjHDEEUfwhz/8gauuuoo77riDPffck9WrV487Pqc54aD5elmW3H777WOGpRrGrNBrqwX1Htx4hStBCIusbuAuc6isuLwUp7gYCCKpEWFZ1vcO08e99td56mguilX0TOjmKzOaunTOvcA5t7bx9bRz7h+dc5c75x5uHH9l45oPOOcedM79xjl3yvbuPy1ccQUMDY09NjQkx6eRuRrTs3jxYk444QTOPffcqgjl6aefZtGiRSxbtoxHH32U7373u+Neu88++/DAAw9QliXf+MY3quMnn3wyn/70p6vna9euncS/gGFMA1OtcGxGfs1ryhzKLhLBxUjqstmWoCIXRvZUw1jRvnN1TqEcW+lpzEtmVOi897/x3q/03q8EjgSGgfCJ+cnwmvf+PwGccwcDZwKHAKcCn3VuhvMB55wD11wDz3mO/EI/5zny/JxzpvVtwpiek046acyoml4+9alP8YlPfIKjjz6aRx55ZMyYnrPPPpsXvehFHHbYYZx++uls3ryZvfbaqxrT01uMEjjrrLO4++67OfPMMwFYsWIFhx9+OIcccgjnnnsuxx133LjXXXnllbz61a/mZS97Gfvuu291/Oqrr2bNmjUsX76cgw8+mM997nM7+89iGFNnqhWOTTNlR+2E4tHosISyV6hCg3oxtuDEhZSnr/fsQltCOGaFKvOOWRvT45w7GbjMe3+cc+5yYIv3/qqecz4A4L3/qD7/PnC59/723vsFbEyPMR4L+XfAUCbjYzkZykL251BhKrvI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
+"
+>
+</div>
+
+</div>
+
 </div>
 </div>
 
