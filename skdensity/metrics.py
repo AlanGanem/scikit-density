@@ -45,7 +45,6 @@ def _check_kde_metrics_input(y_true, y_dists, frac):
     y_true = y_true[idxs]
     return y_true, y_dists
 
-
 # Cell
 def kde_entropy(data, sample_size = 200, frac = 1.0, progress_bar = False, **kde_kwargs):
     '''
@@ -90,7 +89,6 @@ def ppf(percentiles, y_dists):
     assert percentiles.shape[0] == y_dists.shape[0], f'percentiles n_dists should be equal y_dists n_dists. got {percentiles.shape[0]} and {y_dists.shape[0]}'
     values = np.array([np.quantile(y_dists[i], percentiles[i], axis = 0) for i in range(y_dists.shape[0])])
     return _fix_one_sample_2d(values)
-
 
 # Cell
 def _cdf(dist):
@@ -141,9 +139,9 @@ def kde_quantile(y_true, y_dists, frac = 1.0, progress_bar = False, **kde_kwargs
     y_true, y_dists = _check_kde_metrics_input(y_true, y_dists, frac = 1)
     kde = KDE(**kde_kwargs)
     if progress_bar:
-        return _fix_one_dist_2d(np.array([kde.fit(y_dists[i]).cdf(y_true[i]) for i in tqdm([*range(len(y_dists))])]))
+        return np.array([kde.fit(y_dists[i]).cdf(y_true[i]) for i in tqdm([*range(len(y_dists))])])
     else:
-        return _fix_one_dist_2d(np.array([kde.fit(y_dists[i]).cdf(y_true[i]) for i in range(len(y_dists))]))
+        return np.array([kde.fit(y_dists[i]).cdf(y_true[i]) for i in range(len(y_dists))])
 
 # Cell
 def quantile_sklearn(y_true, y_dists):
@@ -158,7 +156,7 @@ def theoretical_entropy(data, dist = 'norm'):
     dist should be one dimensional for cases when `dist` != 'kde'
     '''
     data = _assert_dim_3d(data)
-    return np.array([RandomVariable(d).fit_dist(dist).entropy(dist) for d in data])
+    return np.array([RandomVariable().fit(data, dist).entropy(dist) for d in data])
 
 # Cell
 def marginal_variance(data):
@@ -199,6 +197,7 @@ def agg_smallest_distance(data, agg_func = np.mean):
     '''
     returns the agregate (defined by agg_func) distance of each point and their closest neighbor
     recieves array of shape (n_dists,n_samples, n_dims) and reutrns array of shape (n_dists, n_dims)
+    weights should be of shape (n_dists, n_samples, n_dims)
     '''
     _assert_dim_3d(data)
     data = np.sort(data, axis = 1)
@@ -208,7 +207,7 @@ def agg_smallest_distance(data, agg_func = np.mean):
 
 def cov_smallest_distance(data, agg_func = np.mean):
     '''
-    returns the agregate (defined by agg_func) distance of each point and their closest neighbor
+    returns the covariance matrix of the distances of each point and their closest neighbor
     recieves array of shape (n_dists,n_samples, n_dims) and reutrns array of shape (n_dists, n_dims)
     '''
     _assert_dim_3d(data)

@@ -117,7 +117,7 @@ class KDE():
             bw = self.bw
 
         #ensure bw is positive
-        bw = max(1e-4, bw)
+        bw = max(1e-6, bw)
         #kde
         if self.implementation == 'sklearn':
             self.estimator = KernelDensity(**{**{'bandwidth':bw},**self.kde_kws}).fit(X, y, sample_weight = sample_weight)
@@ -202,7 +202,6 @@ class KDE():
                 dim_grid.append(np.linspace(condition_dict[dim],condition_dict[dim], resolution))
         return np.array(dim_grid).T
 
-
 # Cell
 def _check_kde_metrics_input(y_true, y_dists, frac):
     '''
@@ -223,7 +222,6 @@ def _check_kde_metrics_input(y_true, y_dists, frac):
     y_dists = y_dists[idxs]
     y_true = y_true[idxs]
     return y_true, y_dists
-
 
 # Cell
 def _kde_entropy(data, sample_size = 200, frac = 1.0, progress_bar = False, **kde_kwargs):
@@ -921,4 +919,3 @@ class RVArray(CustomArray):
         Same as RandomVariable.sample
         '''
         return super().__getattr__('sample')(sample_size, dist, broadcast_method = 'simple',**kwargs)
-
