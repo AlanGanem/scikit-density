@@ -118,10 +118,11 @@ class HistogramEstimator(BaseEstimator, ClassifierMixin, DelegateEstimatorMixIn)
     Meanwhile only performs marginal density estiamtion, not joint. Thus, only 1dimensional y.
     For joint, should try something using RegressionChain (to pass dimension information to the prediction of other dims)
     '''
-    def __init__(self,estimator, resolution = 'auto', alpha = 1, calibrated_classifier = None, calibration_cv = 4,rv_bins_kws = {}):
+    def __init__(self,estimator, resolution = 'auto' ,alpha = 1, calibrated_classifier = None, calibration_cv = 4,rv_bins_kws = {}):
         '''
         resolution can be int (number of bins of uniform quantile transformation) or hist array
         '''
+        self.cumulative_target = False #used only in ClassificationKernelEstimator thorugh inheritance
         assert hasattr(estimator, 'predict_proba') or ('predict_proba' in dir(estimator)), 'estimator should implement `predict_proba` method'
         self.estimator = estimator
 
@@ -170,25 +171,54 @@ class HistogramEstimator(BaseEstimator, ClassifierMixin, DelegateEstimatorMixIn)
 
 
 
-    def _q_transformer_transform(self, y):
+    def _q_transformer_transform(self, y, cumulative = False):
         '''
         maps floats to int (bin_id in histogram)
         '''
         y = _fix_X_1d(y)
 
-        if type(self.resolution) in (str, np.ndarray):
-            y_transformed = np.digitize(y, self.bin_edges)
+        if self.cumulative_target:
+            if type(self.resolution) in (str, np.ndarray):
+                hist_bins = np.digitize(y, self.bin_edges)
+                max_bin = len(self.bin_edges)
 
-        elif type(self.resolution) == int:
-            y_transformed = self.q_transformer.transform(y)
-            #scale between 0 and 1
-            y_transformed = self._q_minmax_scaler.transform(y_transformed)
-            y_transformed = np.around(y_transformed*(self.resolution - 1), decimals = 0).astype(int)
 
-        elif isinstance(self.resolution,np.ndarray):
-            y_transformed = np.digitize(y, self.resolution)
+            elif type(self.resolution) == int:
+                hist_bins = self.q_transformer.transform(y)
+                #scale between 0 and 1
+                hist_bins = self._q_minmax_scaler.transform(hist_bins)
+                hist_bins = np.around(hist_bins*(self.resolution - 1), decimals = 0).astype(int)
+                max_bin = self.resolution
 
-        return y_transformed.flatten()
+            elif isinstance(self.resolution,np.ndarray):
+                hist_bins = np.digitize(y, self.resolution)
+                max_bin = self.resolution
+
+
+            y_transformed = np.zeros((y.shape[0],max_bin), dtype = 'int8')
+            for i in range(len(y_transformed)):
+                bin_idx = int(hist_bins[i])
+                y_transformed[i, :bin_idx] = 1
+
+            y_transformed = y_transformed[:,:-1]
+
+        else:
+            if type(self.resolution) in (str, np.ndarray):
+                y_transformed = np.digitize(y, self.bin_edges)
+
+            elif type(self.resolution) == int:
+                y_transformed = self.q_transformer.transform(y)
+                #scale between 0 and 1
+                y_transformed = self._q_minmax_scaler.transform(y_transformed)
+                y_transformed = np.around(y_transformed*(self.resolution - 1), decimals = 0).astype(int)
+
+            elif isinstance(self.resolution,np.ndarray):
+                y_transformed = np.digitize(y, self.resolution)
+
+            y_transformed = y_transformed.flatten()
+
+
+        return y_transformed
 
     def _q_transformer_inverse_transform(self,y):
         '''
@@ -350,6 +380,15 @@ class HistogramEstimator(BaseEstimator, ClassifierMixin, DelegateEstimatorMixIn)
     def score(self, X, y = None, **score_kws):
         return self.estimator.score(X, self._q_transformer_transform(y), **score_kws)
 
+    def predict_proba(self, X):
+        '''
+        predict proba handling multilabel outputs
+        '''
+        probas = self.estimator.predict_proba(X)
+        if self.cumulative_target:
+            probas = np.hstack([i for i in probas])
+        return probas
+
 # Cell
 def minkowski_similarity(X):
     X = normalize(X, norm = 'l2')
@@ -363,11 +402,14 @@ class ClassificationKernelEstimator(HistogramEstimator):
     '''
 
     def __init__(
-            self, estimator, resolution = 'auto', alpha = 1, calibrated_classifier = None, calibration_cv = None,
+            self, estimator, resolution = 'auto', cumulative_target = True,alpha = 1, calibrated_classifier = None, calibration_cv = None,
         prefit_estimator=False, n_neighbors=30, scale_query_space=True, knn_indexer=None,
-        knn_metric='euclidean', similarity_function=None, noise_factor = 0
+        knn_metric='euclidean', similarity_function=None, noise_factor = 0, n_jobs = None,
     ):
 
+        self.n_jobs = n_jobs
+        if cumulative_target:
+            estimator = MultiOutputClassifier(estimator, n_jobs = n_jobs)
         super().__init__(estimator, resolution, alpha, calibrated_classifier, calibration_cv)
         self.n_neighbors = n_neighbors
         self.prefit_estimator = prefit_estimator
@@ -382,14 +424,15 @@ class ClassificationKernelEstimator(HistogramEstimator):
         self.similarity_function = similarity_function
         self.alpha = alpha
         self.noise_factor = noise_factor
+        self.cumulative_target = cumulative_target
         return
 
     def fit(self, X, y=None, **estimator_fit_kws):
         #fit y transformer
         self._preprocess_y_fit(y)
-        #transform y
-        y_transformed = self._preprocess_y_transform(y)
 
+        #transform y
+        y_transformed = self._q_transformer_transform(y)
 
         if not self.prefit_estimator:
             print('fitting estimator')
@@ -399,20 +442,26 @@ class ClassificationKernelEstimator(HistogramEstimator):
                 self.estimator = self.calibrated_classifier.calibrated_classifiers_[0].base_estimator
             else:
                 #fit classifier
-                self.estimator.fit(X = X, y = y_transformed, **estimator_fit_kws)
+                self.estimator.fit(X, y_transformed, **estimator_fit_kws)
+
 
         #get probas for query space
-        probas = self.estimator.predict_proba(X)
+        if self.cumulative_target:
+            probas = self.estimator.predict_proba(X)
+            probas = np.hstack([i for i in probas])
+        else:
+            probas = self.estimator.predict_proba(X)
 
-        if self.scale_query_space:
+        #set space transformer for probability space
+        if self.scale_query_space and not self.cumulative_target:
             self._query_space_scaler = QuantileTransformer().fit(probas)
             probas = self._query_space_scaler.transform(probas)
+            probas = normalize(probas)
         else:
             # make a identity transformer in case of no scalling
             self._query_space_scaler = FunctionTransformer()
 
-
-        self.knn_indexer.fit(normalize(probas))
+        self.knn_indexer.fit(probas)
         self.y_ = y
         return self
 
@@ -420,6 +469,7 @@ class ClassificationKernelEstimator(HistogramEstimator):
 
         # apply scaler
         query_vector = self._query_space_scaler.transform(query_vector)
+
         # query distances and indexes
         dist, idx = [], []
         batches = make_batches(query_vector, batch_size = np.ceil(query_vector.shape[0]/100).astype(int))
@@ -461,8 +511,14 @@ class ClassificationKernelEstimator(HistogramEstimator):
         n_neighbors, alpha, noise_factor = self._handle_similarity_sample_parameters(
             n_neighbors = n_neighbors, alpha = alpha, noise_factor = noise_factor)
 
+        #get probas
+        probas = self.estimator.predict_proba(X)
+        if isinstance(probas, list):
+            #handle multilabel probas
+            probas = np.hstack([i for i in probas])
+
         # get idx and sim using proba vector as query vector
-        idx, sim  = self._query_idx_and_sim(self.estimator.predict_proba(X), n_neighbors)
+        idx, sim  = self._query_idx_and_sim(probas, n_neighbors)
 
         # sample indexes and data, add noise
         if not alpha is None:
@@ -922,7 +978,7 @@ class KernelTreeHistogramEstimator(KernelTreeEstimator):
     An ensemble that learn representitons of data turning target into bins
     '''
 
-    def __init__(self, estimator, entropy_estimator_sampler=None, resolution='auto', class_weight=None, alpha=1, beta=1, gamma=1, node_rank_func=None,
+    def __init__(self, estimator, entropy_estimator_sampler=None, resolution='auto', cumulative_target = False, class_weight=None, alpha=1, beta=1, gamma=1, node_rank_func=None,
                  node_data_rank_func=None, n_neighbors=30, lower_bound=0.0):
 
         assert hasattr(estimator, 'predict_proba') or 'predict_proba' in dir(
@@ -930,6 +986,7 @@ class KernelTreeHistogramEstimator(KernelTreeEstimator):
         super().__init__(estimator, entropy_estimator_sampler, alpha, beta, gamma, node_rank_func,
                          node_data_rank_func, n_neighbors, lower_bound)
 
+        self.cumulative_target = cumulative_target
         self.class_weight = class_weight
         self.resolution = resolution
 
@@ -979,6 +1036,7 @@ class KernelTreeHistogramEstimator(KernelTreeEstimator):
             y_transformed = [np.digitize(
                 y[:, i:i+1], self.bin_edges[i]) for i in range(y.shape[-1])]
             y_transformed = np.hstack(y_transformed)
+            max_bin = [len(edges) for edges in self.bin_edges]
 
         elif type(self.resolution) == int:
             y_transformed = self.q_transformer.transform(y)
@@ -986,14 +1044,30 @@ class KernelTreeHistogramEstimator(KernelTreeEstimator):
             y_transformed = self._q_minmax_scaler.transform(y_transformed)
             y_transformed = np.around(
                 y_transformed*(self.resolution - 1), decimals=0).astype(int)
+            max_bin = [self.resolution for _ in range(y.shape[-1])]
 
         elif isinstance(self.resolution, list):
             y_transformed = [np.digitize(
                 y[:, i:i+1], self.resolution[i]) for i in range(y.shape[-1])]
             y_transformed = np.hstack(y_transformed)
+            max_bin = [len(resolution) if isinstance(resolution, (list, np.ndarray)) else resolution for resolution in self.resolution]
         else:
             raise TypeError(
                     f'self.resolution should be np.array of bin edges, str or int, got {self.resolution.__class__}')
+
+        if self.cumulative_target:
+            #make cumulative vector
+            y_transformed_list = []
+            for i in range(y_transformed.shape[-1]):
+
+                y_transformed_i = np.zeros((y_transformed.shape[0],max_bin[i]), dtype = 'int8')
+                for idx in range(len(y_transformed_i)):
+                    bin_idx = int(y_transformed[idx, i])
+                    y_transformed_i[i, :bin_idx] = 1
+
+                y_transformed_list.append(y_transformed[:,:-1]) #dropa last percentile to avoid all zeros
+
+            y_transformed = np.hstack(y_transformed_list)
 
         return y_transformed
 
@@ -1066,6 +1140,16 @@ class KernelTreeHistogramEstimator(KernelTreeEstimator):
 
         return self
 
+    def predict_proba(self, X):
+        '''
+        handling multilabel output
+        '''
+        probas = self.estimator.predict_proba(X)
+        if self.cumulative_target:
+            probas = np.hstack([i for i in probas])
+        return probas
+
+
 # Cell
 class JointHistogramEstimator(MultiOutputClassifier):
     '''
@@ -1092,9 +1176,10 @@ class JointHistogramEstimator(MultiOutputClassifier):
         if prefit:
             self.estimators_ = estimator
 
+        #set joint_tree_estimator as default
         if joint_tree_estimator is None:
             rf = ensemble.RandomForestClassifier(
-                n_estimators=10, max_leaf_nodes = 10000, )
+                n_estimators=100, max_leaf_nodes = 10000, n_jobs = -1)
             self.joint_tree_estimator = KernelTreeHistogramEstimator(
                 rf, resolution=resolution, **joint_tree_kwargs)
         else:
@@ -1138,6 +1223,7 @@ class JointHistogramEstimator(MultiOutputClassifier):
 
         marginal_results = self._make_stacked_predictors(
             X, self.stacking_method)
+
         self.joint_tree_estimator.fit(marginal_results, y, y_prep = y_prep)
         return self
 
